@@ -66,7 +66,8 @@ export default function AuthScreen({ onAuth }) {
       setPendingUser({ name:form.name.trim(), email:form.email.trim(), password:form.password, phone:form.phone.replace(/\D/g, ""), gymName: null, userType: "personal" });
       setOtpLoading(true);
       try {
-        await sendPhoneOTP(form.phone.replace(/\D/g, ""));
+        const res = await sendPhoneOTP(form.phone.replace(/\D/g, ""));
+        if (res?.mockOtp) setShownOtp(res.mockOtp);
         setOtpSent(true);
         setOtpTimer(120);
         setMode("otp");
@@ -89,7 +90,8 @@ export default function AuthScreen({ onAuth }) {
         
         setOtpLoading(true);
         try {
-          await sendPhoneOTP(form.phone.replace(/\D/g, ""));
+          const res = await sendPhoneOTP(form.phone.replace(/\D/g, ""));
+          if (res?.mockOtp) setShownOtp(res.mockOtp);
           setOtpSent(true);
           setOtpTimer(120);
           setMode("otp");
@@ -180,7 +182,8 @@ export default function AuthScreen({ onAuth }) {
     setPendingGymOwner(details);
     setOtpLoading(true);
     try {
-      await sendPhoneOTP(details.phone);
+      const res = await sendPhoneOTP(details.phone);
+      if (res?.mockOtp) setShownOtp(res.mockOtp);
       setOtpSent(true);
       setOtpTimer(120);
       setMode("otp");
@@ -319,11 +322,27 @@ export default function AuthScreen({ onAuth }) {
                 <p style={{ color:"#93A8C8", fontSize:13, margin:0 }}>We sent a 6-digit code to {pendingUser?.phone || pendingGymOwner?.phone}</p>
               </div>
 
-              {/* OTP Status Message */}
+              {/* OTP Status Message / Mock OTP Display */}
               {otpSent && (
-                <div style={{ background:"#DCFCE7", border:"1px solid #86EFAC", borderRadius:9, padding:12, marginBottom:16, textAlign:"center" }}>
-                  <div style={{ color:"#16A34A", fontSize:13, fontWeight:700 }}>✓ OTP sent successfully</div>
-                  <div style={{ color:"#4ADE80", fontSize:12, marginTop:4 }}>Check your SMS/WhatsApp</div>
+                <div style={{ background: shownOtp ? "#FFFBEB" : "#DCFCE7", border: shownOtp ? "1px solid #FCD34D" : "1px solid #86EFAC", borderRadius:9, padding:12, marginBottom:16, textAlign:"center" }}>
+                  <div style={{ color: shownOtp ? "#D97706" : "#16A34A", fontSize:13, fontWeight:700 }}>
+                    {shownOtp ? "🔑 Testing / Demo OTP Mode" : "✓ OTP sent successfully"}
+                  </div>
+                  {shownOtp ? (
+                    <div style={{ marginTop: 6 }}>
+                      <div className="auth-otp-display" style={{ fontSize:26, fontWeight:800, color:"#92400E", letterSpacing:6, fontFamily:"'Barlow Condensed',sans-serif", margin:"4px 0" }}>
+                        {shownOtp}
+                      </div>
+                      <button type="button" onClick={copyOtp} className="auth-otp-copy-btn" style={{
+                        marginTop:4, background:"#F59E0B", border:"none", borderRadius:6, color:"#fff",
+                        padding:"5px 14px", fontSize:12, fontWeight:700, cursor:"pointer"
+                      }}>
+                        {copied ? "✓ Auto-filled!" : "Auto-fill Code"}
+                      </button>
+                    </div>
+                  ) : (
+                    <div style={{ color:"#15803D", fontSize:12, marginTop:4 }}>Check your WhatsApp</div>
+                  )}
                 </div>
               )}
 
@@ -348,7 +367,8 @@ export default function AuthScreen({ onAuth }) {
                     setError("");
                     setOtpLoading(true);
                     try {
-                      await sendPhoneOTP(pendingUser?.phone || pendingGymOwner?.phone);
+                      const res = await sendPhoneOTP(pendingUser?.phone || pendingGymOwner?.phone);
+                      if (res?.mockOtp) setShownOtp(res.mockOtp);
                       setOtpTimer(120);
                       setForm(f => ({ ...f, otp: "" }));
                       setError("");

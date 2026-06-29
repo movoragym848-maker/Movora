@@ -122,33 +122,11 @@ export async function sendOTP(phoneNumber) {
       };
     }
 
-    // 2. Try MSG91 Fallback
-    console.log('⚠️ WhatsApp failed. Trying MSG91...');
-    const msg91Result = await sendViaMsg91(phoneNumber, otp);
-    if (msg91Result && msg91Result.success) {
-      return {
-        success: true,
-        message: `✅ OTP sent via SMS (MSG91) to ${phoneNumber}.`,
-        isMock: false
-      };
-    }
-
-    // 3. Try Twilio SMS Fallback
-    console.log('⚠️ MSG91 failed. Trying Twilio SMS...');
-    const twilioResult = await sendViaTwilio(phoneNumber, otp);
-    if (twilioResult && twilioResult.success) {
-      return {
-        success: true,
-        message: `✅ OTP sent via SMS (Twilio) to ${phoneNumber}.`,
-        isMock: false
-      };
-    }
-
-    // 4. Default: Mock Mode Fallback for local testing/development
+    // 2. Default: Mock Mode Fallback when WhatsApp is unavailable/failed
     console.log(`✅ [MOCK OTP MODE] Phone: ${phoneNumber} | OTP: ${otp} (valid for 10 minutes)`);
     return { 
       success: true, 
-      message: `✅ All delivery channels failed/unconfigured. OTP sent (Mock Mode). Check backend console logs.`,
+      message: `✅ WhatsApp delivery unavailable. OTP generated in Mock Mode.`,
       mockOtp: otp,
       isMock: true
     };

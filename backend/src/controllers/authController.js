@@ -177,7 +177,7 @@ export async function sendPhoneOTP(req, res, next) {
       return res.status(400).json({ message: result.message });
     }
 
-    res.json({ ok: true, message: result.message });
+    res.json({ ok: true, message: result.message, mockOtp: result.mockOtp, isMock: result.isMock });
   } catch (err) {
     next(err);
   }
