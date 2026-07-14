@@ -1,4 +1,18 @@
-const API_URL = (import.meta.env?.VITE_API_URL || "http://localhost:4000/api").trim().replace(/\/+$/, "");
+const API_URL = (import.meta.env?.VITE_API_URL || "https://movora-api.onrender.com/api").trim().replace(/\/+$/, "");
+
+if (typeof window !== "undefined") {
+  window.MOVORA_API_URL = API_URL;
+  console.info("[API] Using API_URL=", API_URL);
+}
+
+function isNetworkError(err) {
+  const msg = err?.message?.toLowerCase() || "";
+  return msg.includes("failed to fetch") || msg.includes("network") || msg.includes("offline") || msg.includes("dns") || msg.includes("timeout");
+}
+
+function delay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
 
 // Helper to show API errors
 const showAPIError = (message, retry = null) => {
@@ -44,6 +58,7 @@ export async function request(path, options = {}, retryCount = 0) {
   const session = JSON.parse(localStorage.getItem("rs_session") || localStorage.getItem("rs_gym_owner_session") || "null");
   const headers = { "Content-Type": "application/json", ...(options.headers || {}) };
   if (session?.accessToken) headers.Authorization = `Bearer ${session.accessToken}`;
+  const fullUrl = `${API_URL}${path}`;
   
   try {
     // Check network connectivity
@@ -51,7 +66,8 @@ export async function request(path, options = {}, retryCount = 0) {
       throw new Error("No internet connection");
     }
 
-    const res = await fetch(`${API_URL}${path}`, { ...options, headers });
+    const fetchOptions = { mode: "cors", cache: "no-store", ...options, headers };
+    const res = await fetch(fullUrl, fetchOptions);
     const data = await res.json().catch(() => ({}));
     
     // Handle token expiration with refresh
@@ -71,21 +87,33 @@ export async function request(path, options = {}, retryCount = 0) {
       const error = new Error(data.message || `Request failed (${res.status})`);
       error.data = data;
       error.status = res.status;
+      error.url = fullUrl;
       throw error;
     }
     return data;
   } catch (err) {
-    // Enhanced error handling
-    if (err.message.includes("Failed to fetch") || err.message.includes("Network")) {
-      const networkError = new Error("Network error: Please check your internet connection");
+    const message = err?.message || "Unknown error";
+    const shouldRetry = (message.includes("Failed to fetch") || message.includes("Network") || message.includes("timeout") || message.includes("DNS")) && retryCount === 0;
+
+    if (shouldRetry) {
+      await delay(500);
+      return request(path, options, retryCount + 1);
+    }
+
+    if (message.includes("Failed to fetch") || message.includes("Network") || message.includes("timeout") || message.includes("DNS")) {
+      const networkError = new Error(`Network error contacting ${fullUrl}: ${message}`);
       networkError.isNetworkError = true;
+      networkError.url = fullUrl;
+      networkError.originalMessage = message;
       throw networkError;
     }
-    if (err.message.includes("No internet")) {
-      const offlineError = new Error("No internet connection. Please check your network.");
+    if (message.includes("No internet")) {
+      const offlineError = new Error(`No internet connection. Please check your network. (${fullUrl})`);
       offlineError.isNetworkError = true;
+      offlineError.url = fullUrl;
       throw offlineError;
     }
+    err.url = fullUrl;
     throw err;
   }
 }
@@ -96,6 +124,8 @@ export const signupGymOwner = payload => request("/gym-owners/signup", { method:
 export const loginGymOwner = payload => request("/gym-owners/login", { method:"POST", body:JSON.stringify(payload) });
 export const getGymMembers = () => request("/gym-owners/members");
 export const sendMemberReminder = payload => request("/gym-owners/send-reminder", { method:"POST", body:JSON.stringify(payload) });
+export const addGymMember = payload => request("/gym-owners/add-member", { method:"POST", body:JSON.stringify(payload) });
+
 export const logout = refreshToken => {
   const isGymOwner = !!localStorage.getItem("rs_gym_owner_session");
   const endpoint = isGymOwner ? "/gym-owners/logout" : "/auth/logout";

@@ -21,7 +21,13 @@ export default class ErrorBoundary extends Component {
 
   handleReset = () => {
     this.setState({ hasError: false, error: null, errorInfo: null });
-    window.location.href = "/";
+    if (typeof this.props.onHome === "function") {
+      this.props.onHome();
+      return;
+    }
+    if (typeof window !== "undefined") {
+      window.location.href = "/";
+    }
   };
 
   render() {
@@ -127,8 +133,7 @@ export default class ErrorBoundary extends Component {
               <button
                 onClick={() => window.location.reload()}
                 style={{
-                  flex: 1,
-                  minWidth: 120,
+                  width: "100%",
                   background: "#3B82F6",
                   border: "none",
                   borderRadius: 10,
@@ -146,29 +151,6 @@ export default class ErrorBoundary extends Component {
                 onMouseLeave={e => e.target.style.opacity = "1"}
               >
                 🔄 Refresh
-              </button>
-              <button
-                onClick={this.handleReset}
-                style={{
-                  flex: 1,
-                  minWidth: 120,
-                  background: "transparent",
-                  border: "1.5px solid #3B82F6",
-                  borderRadius: 10,
-                  padding: "clamp(10px, 2vw, 12px)",
-                  color: "#3B82F6",
-                  fontSize: "clamp(12px, 3vw, 14px)",
-                  fontWeight: 700,
-                  cursor: "pointer",
-                  fontFamily: "'Barlow Condensed', sans-serif",
-                  textTransform: "uppercase",
-                  minHeight: 40,
-                  transition: "background 0.2s"
-                }}
-                onMouseEnter={e => e.target.style.background = "rgba(59, 130, 246, 0.1)"}
-                onMouseLeave={e => e.target.style.background = "transparent"}
-              >
-                🏠 Home
               </button>
             </div>
 
@@ -193,7 +175,7 @@ export default class ErrorBoundary extends Component {
                 fontWeight: 500,
                 lineHeight: 1.5
               }}>
-                Contact support@movora.com or try refreshing the page
+                Contact movoragym848@gmail.com or try refreshing the page
               </div>
             </div>
           </div>
@@ -204,3 +186,8 @@ export default class ErrorBoundary extends Component {
     return this.props.children;
   }
 }
+
+ErrorBoundary.defaultProps = {
+  showHomeButton: false,
+  onHome: null,
+};

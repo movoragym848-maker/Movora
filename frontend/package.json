@@ -5,11 +5,14 @@
     "preview": "vite preview --host 0.0.0.0"
   },
   "dependencies": {
+    "@capacitor/android": "^8.4.1",
+    "@capacitor/cli": "^8.4.1",
+    "@capacitor/core": "^8.4.1",
     "@vitejs/plugin-react": "latest",
-    "vite": "latest",
     "react": "latest",
     "react-dom": "latest",
-    "recharts": "latest"
-  },
-  "devDependencies": {}
+    "recharts": "latest",
+    "resize-observer-polyfill": "^1.5.1",
+    "vite": "latest"
+  }
 }

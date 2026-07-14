@@ -498,3 +498,72 @@ export async function renewGymMember(req, res, next) {
   }
 }
 
+export async function addGymMember(req, res, next) {
+  try {
+    if (req.user.role !== "gym_owner") {
+      return res.status(403).json({ message: "Access forbidden. Gym owner role required." });
+    }
+    const gymOwnerId = req.user.sub;
+    const { rows: ownerRows } = await query("SELECT gym_name FROM gym_owners WHERE id = $1", [gymOwnerId]);
+    if (ownerRows.length === 0) {
+      return res.status(404).json({ message: "Gym owner not found." });
+    }
+    const gymName = ownerRows[0].gym_name;
+
+    const { firstName, lastName, email, phone } = req.body;
+    if (!firstName || !lastName || !email || !phone) {
+      return res.status(400).json({ message: "First name, last name, email, and phone number are required." });
+    }
+
+    const fullName = `${firstName.trim()} ${lastName.trim()}`;
+    const cleanPhone = phone.replace(/\D/g, '');
+    
+    // Basic phone validation
+    if (!/^[6-9]\d{9}$/.test(cleanPhone)) {
+      return res.status(400).json({ message: "Invalid Indian phone number. Must be 10 digits starting with 6-9." });
+    }
+
+    // Check if email or phone is already registered
+    const userCheck = await query(
+      "SELECT 1 FROM users WHERE email = $1 OR phone = $2",
+      [email.toLowerCase().trim(), cleanPhone]
+    );
+    if (userCheck.rowCount > 0) {
+      return res.status(409).json({ message: "Email or phone number is already registered." });
+    }
+
+    // Hash a default password
+    const passwordHash = await bcrypt.hash("RsGymMember123!", 12);
+
+    // Insert new user
+    const { rows } = await query(
+      `INSERT INTO users (name, email, phone, password_hash, gym_name, user_type)
+       VALUES ($1, $2, $3, $4, $5, 'gym_member')
+       RETURNING id, name, email, phone`,
+      [fullName, email.toLowerCase().trim(), cleanPhone, passwordHash, gymName]
+    );
+
+    const newUser = rows[0];
+
+    // Initialize user goal to bulking as in standard signup
+    await query("INSERT INTO user_goals (user_id, goal) VALUES ($1, 'bulking') ON CONFLICT DO NOTHING", [newUser.id]);
+
+    res.status(201).json({
+      message: "Member added successfully.",
+      member: {
+        user_id: newUser.id,
+        name: newUser.name,
+        phone: newUser.phone,
+        email: newUser.email,
+        plan: "No Plan",
+        status: "inactive",
+        days_remaining: 0,
+        membership_type: "no_membership"
+      }
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+

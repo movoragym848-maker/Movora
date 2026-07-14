@@ -18,7 +18,7 @@ export default function APIErrorDisplay() {
       return originalFetch.apply(this, args)
         .catch(err => {
           if (err.message.includes("Network") || err.message.includes("Failed")) {
-            window.handleAPIError("Network request failed. Please check your connection.");
+            window.handleAPIError(err.message || "Network request failed. Please check your connection.");
           }
           throw err;
         });
@@ -113,6 +113,16 @@ export default function APIErrorDisplay() {
             wordBreak: "break-word"
           }}>
             {error?.message}
+            {error?.url && (
+              <div style={{ marginTop: 8, color: "#991B1B", fontSize: "0.85rem" }}>
+                URL: {error.url}
+              </div>
+            )}
+            {error?.originalMessage && error.originalMessage !== error.message && (
+              <div style={{ marginTop: 6, color: "#991B1B", fontSize: "0.8rem" }}>
+                Details: {error.originalMessage}
+              </div>
+            )}
           </div>
 
           {/* Action Buttons */}

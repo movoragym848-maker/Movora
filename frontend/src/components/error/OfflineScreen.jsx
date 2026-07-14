@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { C } from "../../constants/data";
 
 export default function OfflineScreen() {
-  const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [isOnline, setIsOnline] = useState(() => typeof navigator !== "undefined" ? navigator.onLine : true);
   const [showAnimation, setShowAnimation] = useState(true);
 
   useEffect(() => {

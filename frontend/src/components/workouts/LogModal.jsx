@@ -3,10 +3,10 @@ import { C, EXERCISES } from "../../constants/data";
 import { Field, GhostBtn, Overlay, PrimaryBtn } from "../common";
 
 export default function LogModal({ onClose, onSave, goal }) {
-  const [cat, setCat] = useState("All");
-  const [exercise, setExercise] = useState(null);
-  const [sets, setSets] = useState([{ weight:"", reps:"" }]);
-  const [mode, setMode] = useState(goal || "bulking");
+  const [cat, setCat] = useState(() => "All");
+  const [exercise, setExercise] = useState(() => null);
+  const [sets, setSets] = useState(() => [{ weight:"", reps:"" }]);
+  const [mode, setMode] = useState(() => goal || "bulking");
   const [note, setNote] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
 

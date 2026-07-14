@@ -5,6 +5,7 @@ export function mapUser(row) {
     email: row.email,
     phone: row.phone,
     role: row.role,
+    userType: row.user_type,
     gymName: row.gym_name,
     joinedAt: row.created_at,
   };

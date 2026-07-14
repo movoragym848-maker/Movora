@@ -20,6 +20,9 @@ export default function AuthScreen({ onAuth }) {
   const [otpTimer, setOtpTimer] = useState(0);
 
   useEffect(() => {
+    if (typeof window !== "undefined") {
+      // normal startup
+    }
     if (mode === "membershipModeSelection") {
       getRegisteredGyms()
         .then(gyms => setRegisteredGyms(gyms))
@@ -41,9 +44,26 @@ export default function AuthScreen({ onAuth }) {
     setError("");
     try {
       const session = await login({ email: form.email.trim(), password: form.password });
-      onAuth(session);
+      
+      // Validate session structure before proceeding
+      if (!session) {
+        throw new Error("No session returned from server");
+      }
+      
+      if (session.accountType !== "gym_owner" && (!session.user || !session.user.email || !session.user.name)) {
+        throw new Error("Invalid session data: missing required user fields");
+      }
+      
+      try {
+        onAuth(session);
+      } catch (authErr) {
+        console.error("Error in onAuth callback:", authErr);
+        throw new Error(`Failed to initialize session: ${authErr.message}`);
+      }
     } catch (err) {
-      setError(err.message || "Login failed.");
+      const errorMsg = err?.message || "Login failed.";
+      console.error("Login error:", err);
+      setError(errorMsg);
     }
   };
 
@@ -72,8 +92,10 @@ export default function AuthScreen({ onAuth }) {
         setOtpTimer(120);
         setMode("otp");
         setForm(f => ({ ...f, otp: "" }));
+        // debug removed
       } catch (otpErr) {
         setError(otpErr.message || "Failed to send OTP. Please try again.");
+        // debug removed
       } finally {
         setOtpLoading(false);
       }
@@ -162,6 +184,8 @@ export default function AuthScreen({ onAuth }) {
 
   const handleGymSignup = async () => {
     setError("");
+    // Debug: confirm handler execution
+    try { console.log("handleGymSignup called", { gymName: gymForm.gymName, phoneLast4: (gymForm.phone || '').slice(-4) }); } catch(e){}
     if (!gymForm.gymName.trim() || !gymForm.phone.trim() || !gymForm.email.trim() || !gymForm.password || !gymForm.city.trim()) {
       return setError("All gym owner fields required.");
     }
@@ -212,8 +236,10 @@ export default function AuthScreen({ onAuth }) {
   };
 
   return (
-    <div style={{ minHeight:"100vh", background:"linear-gradient(135deg, #EEF4FF 0%, #DBEAFE 50%, #BFDBFE 100%)",
-      padding:"clamp(16px, 5vw, 24px)", fontFamily:"'Barlow',sans-serif", overflowY:"auto" }}>
+    <div style={{ minHeight:"100vh", width:"100%", display:"flex", alignItems:"center", justifyContent:"center",
+      background:"linear-gradient(135deg, #EEF4FF 0%, #DBEAFE 50%, #BFDBFE 100%)",
+      padding:"max(24px, env(safe-area-inset-top)) clamp(16px, 4vw, 24px) max(24px, env(safe-area-inset-bottom))",
+      fontFamily:"'Barlow',sans-serif", overflowX:"hidden", overflowY:"auto", boxSizing:"border-box", WebkitOverflowScrolling:"touch" }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@600;700;800&display=swap');
         *{box-sizing:border-box}
@@ -221,6 +247,7 @@ export default function AuthScreen({ onAuth }) {
         
         @media (max-width: 640px) {
           .auth-card {
+            width:100% !important;
             padding: 20px 16px 18px !important;
             border-radius: 16px !important;
             max-width: 100% !important;
@@ -285,7 +312,9 @@ export default function AuthScreen({ onAuth }) {
           }
         }
       `}</style>
-      <div style={{ width:"100%", maxWidth:400, margin:"0 auto" }}>
+      <div style={{ width:"100%", maxWidth:400, minWidth:0, margin:"0 auto", display:"flex", flexDirection:"column", alignItems:"center" }}>
+
+        
 
         {/* Logo */}
         <div className="auth-logo" style={{ textAlign:"center", marginBottom:28 }}>
@@ -309,8 +338,8 @@ export default function AuthScreen({ onAuth }) {
         </div>
 
         {/* Card */}
-        <div className="auth-card" style={{ background:"#fff", borderRadius:20, padding:"28px 28px 24px",
-          boxShadow:"0 12px 40px rgba(59,130,246,0.14)", border:"1px solid #DBEAFE" }}>
+        <div className="auth-card" style={{ width:"100%", maxWidth:420, background:"#fff", borderRadius:20, padding:"28px 28px 24px",
+          boxShadow:"0 12px 40px rgba(59,130,246,0.14)", border:"1px solid #DBEAFE", minWidth:0 }}>
 
           {mode === "otp" ? (
             <form onSubmit={(e) => { e.preventDefault(); handleVerify(); }} style={{ margin: 0 }}>

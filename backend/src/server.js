@@ -6,9 +6,6 @@ import { routes } from "./routes/index.js";
 import { cleanupExpiredOTPs } from "./services/otpService.js";
 
 const app = express();
-const allowedOrigins = new Set(env.corsOrigin.split(",").map(origin => origin.trim()).filter(Boolean));
-const isLocalDevOrigin = origin => /^https?:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin || "");
-
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
@@ -24,12 +21,7 @@ app.use(helmet({
   },
 }));
 app.use(cors({
-  origin(origin, callback) {
-    if (!origin || allowedOrigins.has(origin) || (env.nodeEnv === "development" && isLocalDevOrigin(origin))) {
-      return callback(null, true);
-    }
-    return callback(new Error(`CORS blocked origin: ${origin}`));
-  },
+  origin: true,
   credentials: true,
 }));
 app.use(express.json({ limit: "1mb" }));

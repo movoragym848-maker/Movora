@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { requireAuth } from "../middleware/auth.js";
-import { loginGymOwner, signupGymOwner, logoutGymOwner, refreshGymOwnerToken, getGymMembers, sendMemberReminder, renewGymMember } from "../controllers/gymOwnerController.js";
+import { loginGymOwner, signupGymOwner, logoutGymOwner, refreshGymOwnerToken, getGymMembers, sendMemberReminder, renewGymMember, addGymMember } from "../controllers/gymOwnerController.js";
 
 export const gymOwnerRoutes = Router();
 gymOwnerRoutes.post("/signup", signupGymOwner);
@@ -10,3 +10,5 @@ gymOwnerRoutes.post("/refresh", refreshGymOwnerToken);
 gymOwnerRoutes.get("/members", requireAuth, getGymMembers);
 gymOwnerRoutes.post("/send-reminder", requireAuth, sendMemberReminder);
 gymOwnerRoutes.post("/renew-membership", requireAuth, renewGymMember);
+gymOwnerRoutes.post("/add-member", requireAuth, addGymMember);
+

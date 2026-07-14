@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from "recharts";
 
 // ─── DATA ──────────────────────────────────────────────────────────────────────
@@ -1337,9 +1337,9 @@ function App({ user, onLogout }) {
   const saveLS = (key, val) => localStorage.setItem(key, JSON.stringify(val));
 
   const [tab, setTab] = useState("dashboard");
-  const [goal, setGoal] = useState(LS(`rs_goal_${user.email}`) || "bulking");
-  const [subscription, setSubscription] = useState(LS(`rs_subscription_${user.email}`));
-  const [subscriptionTransactions, setSubscriptionTransactions] = useState(LS(`rs_subscription_tx_${user.email}`) || []);
+  const [goal, setGoal] = useState(() => LS(`rs_goal_${email}`) || "bulking");
+  const [subscription, setSubscription] = useState(() => LS(`rs_subscription_${email}`));
+  const [subscriptionTransactions, setSubscriptionTransactions] = useState(() => LS(`rs_subscription_tx_${email}`) || []);
   const subscriptionDaysLeft = getSubscriptionDays(subscription);
   const subscriptionActive = subscriptionDaysLeft > 0;
 
@@ -1368,17 +1368,17 @@ function App({ user, onLogout }) {
   };
 
   // Exercise logs
-  const [logs, setLogs] = useState(LS(`rs_logs_${user.email}`) || []);
+  const [logs, setLogs] = useState(() => LS(`rs_logs_${user.email}`) || []);
   const saveLogs = v => { setLogs(v); saveLS(`rs_logs_${user.email}`, v); };
 
   // Weight logs
-  const [wLogs, setWLogs] = useState(LS(`rs_wlogs_${user.email}`) || []);
+  const [wLogs, setWLogs] = useState(() => LS(`rs_wlogs_${user.email}`) || []);
   const saveWLogs = v => { setWLogs(v); saveLS(`rs_wlogs_${user.email}`, v); };
   const [wInput, setWInput] = useState("");
   const [wNote, setWNote] = useState("");
 
   // Calorie logs (keyed by date string)
-  const [today, setToday] = useState(new Date().toDateString());
+  const [today, setToday] = useState(() => new Date().toDateString());
   useEffect(() => {
     const interval = setInterval(() => {
       const newDay = new Date().toDateString();
@@ -1386,8 +1386,8 @@ function App({ user, onLogout }) {
     }, 60000); // check every minute
     return () => clearInterval(interval);
   }, [today]);
-  const [selectedCalDate, setSelectedCalDate] = useState(today);
-  const [calAllLogs, setCalAllLogs] = useState(LS(`rs_cal_${user.email}`) || {});
+  const [selectedCalDate, setSelectedCalDate] = useState(() => today);
+  const [calAllLogs, setCalAllLogs] = useState(() => LS(`rs_cal_${user.email}`) || {});
   const calLogs = calAllLogs[selectedCalDate] || { Breakfast:[], Lunch:[], Dinner:[], Snacks:[] };
   const saveCalDay = updated => {
     const all = { ...calAllLogs, [selectedCalDate]: updated };
@@ -1395,7 +1395,7 @@ function App({ user, onLogout }) {
     saveLS(`rs_cal_${user.email}`, all);
   };
 
-  const [calProfile, setCalProfile] = useState(LS(`rs_calprofile_${user.email}`));
+  const [calProfile, setCalProfile] = useState(() => LS(`rs_calprofile_${user.email}`));
   const [showCalSetup, setShowCalSetup] = useState(false);
   const [showFoodPicker, setShowFoodPicker] = useState(false);
   const [activeMeal, setActiveMeal] = useState("Breakfast");
@@ -1403,17 +1403,17 @@ function App({ user, onLogout }) {
   const [manualCal, setManualCal] = useState("");
 
   // Misc UI
-  const [showLog, setShowLog] = useState(false);
-  const [selectedEx, setSelectedEx] = useState("Bench Press");
-  const [filterCat, setFilterCat] = useState("All");
-  const [workoutCat, setWorkoutCat] = useState("Push");
-  const [workoutEx, setWorkoutEx] = useState(EXERCISE_VIDEOS["Push"][0]);
+  const [showLog, setShowLog] = useState(() => false);
+  const [selectedEx, setSelectedEx] = useState(() => "Bench Press");
+  const [filterCat, setFilterCat] = useState(() => "All");
+  const [workoutCat, setWorkoutCat] = useState(() => "Push");
+  const [workoutEx, setWorkoutEx] = useState(() => EXERCISE_VIDEOS["Push"][0] || {});
 
   // Step tracker
-  const [stepLogs, setStepLogs] = useState(LS(`rs_steps_${email}`) || {});
-  const todaySteps = stepLogs[today] || 0;
-  const stepWeight = calProfile ? parseFloat(calProfile.weight) || 70 : 70;
-  const calBurned = Math.round(todaySteps * 0.04 * (stepWeight / 70));
+  const [stepLogs, setStepLogs] = useState(() => LS(`rs_steps_${email}`) || {});
+  const todaySteps = useMemo(() => stepLogs[today] || 0, [stepLogs, today]);
+  const stepWeight = useMemo(() => calProfile ? parseFloat(calProfile.weight) || 70 : 70, [calProfile]);
+  const calBurned = useMemo(() => Math.round(todaySteps * 0.04 * (stepWeight / 70)), [todaySteps, stepWeight]);
   const [stepInput, setStepInput] = useState("");
   const [editingSteps, setEditingSteps] = useState(false);
   const saveSteps = steps => {
@@ -1448,10 +1448,10 @@ function App({ user, onLogout }) {
   const removeFood = (meal, id) => saveCalDay({ ...calLogs, [meal]: calLogs[meal].filter(e=>e.id!==id) });
 
   // Derived
-  const todayLogs = logs.filter(l => new Date(l.date).toDateString()===today);
-  const weekLogs  = logs.filter(l => (Date.now()-new Date(l.date)) < 7*86400000);
-  const uniqueExs = [...new Set(logs.map(l=>l.exercise))];
-  const totalVol  = logs.reduce((a,l) => a+l.sets.reduce((b,s) => b+(parseFloat(s.weight)||0)*(parseInt(s.reps)||0),0), 0);
+  const todayLogs = useMemo(() => logs.filter(l => new Date(l.date).toDateString()===today), [logs, today]);
+  const weekLogs = useMemo(() => logs.filter(l => (Date.now()-new Date(l.date)) < 7*86400000), [logs]);
+  const uniqueExs = useMemo(() => [...new Set(logs.map(l=>l.exercise))], [logs]);
+  const totalVol = useMemo(() => logs.reduce((a,l) => a+l.sets.reduce((b,s) => b+(parseFloat(s.weight)||0)*(parseInt(s.reps)||0),0), 0), [logs]);
 
   const goalBg   = goal==="bulking" ? "rgba(34,197,94,0.13)"  : "rgba(245,158,11,0.13)";
   const goalBdr  = goal==="bulking" ? C.success : C.warning;

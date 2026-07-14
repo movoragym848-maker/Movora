@@ -3,7 +3,7 @@ import { C } from "../../constants/data";
 import { Field, GhostBtn, Overlay, PrimaryBtn } from "../common";
 
 export default function CalSetupModal({ onClose, onSave, goal, initial }) {
-  const [form, setForm] = useState(initial || { height:"", weight:"", age:"", gender:"male", activity:"moderate" });
+  const [form, setForm] = useState(() => initial || { height:"", weight:"", age:"", gender:"male", activity:"moderate" });
   const set = k => e => setForm(f => ({ ...f, [k]:e.target.value }));
 
   const calcGoal = (p) => {

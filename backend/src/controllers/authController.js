@@ -166,9 +166,23 @@ export async function getRegisteredGyms(req, res, next) {
 export async function sendPhoneOTP(req, res, next) {
   try {
     const { phone } = req.body;
-    
+
     if (!phone || !/^\d{10}$/.test(phone)) {
       return res.status(400).json({ message: "Invalid phone number. Must be 10 digits." });
+    }
+
+    // Prevent sending OTP to a phone that's already registered
+    try {
+      const { rows: existingUsers } = await query(
+        "SELECT id FROM users WHERE phone = $1 AND deleted_at IS NULL",
+        [phone]
+      );
+      if (existingUsers.length > 0) {
+        return res.status(409).json({ message: "Phone number already registered. Please log in." });
+      }
+    } catch (dbErr) {
+      console.error('Error checking existing user for phone in sendPhoneOTP:', dbErr);
+      return next(dbErr);
     }
 
     const result = await sendOTP(phone);

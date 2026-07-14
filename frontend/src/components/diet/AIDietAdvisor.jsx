@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { C } from "../../constants/data";
 
-const API_URL = (import.meta.env?.VITE_API_URL || "http://localhost:4000/api").trim().replace(/\/+$/, "");
+const API_URL = (import.meta.env?.VITE_API_URL || "https://movora-api.onrender.com/api").trim().replace(/\/+$/, "");
 
 export default function AIDietAdvisor({ user, goal, calProfile, calGoal, totalCal, logs, todaySteps, calBurned }) {
   const [aiPrompt, setAiPrompt] = useState("");

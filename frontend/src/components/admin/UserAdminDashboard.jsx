@@ -99,7 +99,7 @@ export default function UserAdminDashboard({ user, logs, weekLogs, uniqueExs, to
           ].map(item => (
             <div key={item.label} className="user-admin-summary-item" style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:10, padding:"11px" }}>
               <div className="user-admin-summary-item-label" style={{ color:C.muted, fontSize:10, textTransform:"uppercase", letterSpacing:1, fontWeight:700, marginBottom:4 }}>{item.label}</div>
-              <div className="user-admin-summary-item-value" style={{ color:C.primary, fontFamily:"'Barlow Condensed',sans-serif", fontSize:"clamp(16px, 4vw, 21px)", fontWeight:800 }}>{item.value}</div>
+              <div className="user-admin-summary-item-value" style={{ color:C.dark, fontFamily:"'Barlow Condensed',sans-serif", fontSize:"clamp(16px, 4vw, 21px)", fontWeight:800 }}>{item.value}</div>
             </div>
           ))}
         </div>

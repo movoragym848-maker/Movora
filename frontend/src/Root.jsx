@@ -6,6 +6,7 @@ import OfflineScreen from "./components/error/OfflineScreen";
 import ErrorBoundary from "./components/error/ErrorBoundary";
 import APIErrorDisplay from "./components/error/APIErrorDisplay";
 import Onboarding from "./components/onboarding/Onboarding";
+import { C } from "./constants/data";
 
 export default function Root() {
   const [showOnboarding, setShowOnboarding] = useState(() => {
@@ -39,21 +40,46 @@ export default function Root() {
   });
 
   const handleAuth = session => {
-    if (session.accountType === "gym_owner") {
-      try {
-        localStorage.setItem("rs_gym_owner_session", JSON.stringify(session));
-        localStorage.removeItem("rs_session");
-      } catch {}
-      setGymOwner(session.gymOwner);
-      setUser(null);
-      return;
-    }
     try {
-      localStorage.setItem("rs_session", JSON.stringify(session));
-      localStorage.removeItem("rs_gym_owner_session");
-    } catch {}
-    setUser(session.user || session);
-    setGymOwner(null);
+      if (!session) {
+        console.error("handleAuth: Session is null or undefined");
+        return;
+      }
+
+      if (session.accountType === "gym_owner") {
+        if (!session.gymOwner || !session.gymOwner.email) {
+          console.error("handleAuth: Invalid gym owner data", session.gymOwner);
+          return;
+        }
+        try {
+          localStorage.setItem("rs_gym_owner_session", JSON.stringify(session));
+          localStorage.removeItem("rs_session");
+        } catch (e) {
+          console.error("Failed to save gym owner session:", e);
+        }
+        setGymOwner(session.gymOwner);
+        setUser(null);
+        return;
+      }
+
+      // Member/User session
+      const userData = session.user || session;
+      if (!userData || !userData.email || !userData.name) {
+        console.error("handleAuth: Invalid user data", userData);
+        return;
+      }
+      
+      try {
+        localStorage.setItem("rs_session", JSON.stringify(session));
+        localStorage.removeItem("rs_gym_owner_session");
+      } catch (e) {
+        console.error("Failed to save user session:", e);
+      }
+      setUser(userData);
+      setGymOwner(null);
+    } catch (err) {
+      console.error("handleAuth error:", err);
+    }
   };
   const handleLogout = () => {
     try {
@@ -69,6 +95,15 @@ export default function Root() {
       localStorage.setItem("rs_onboarding_completed", "true");
     } catch {}
     setShowOnboarding(false);
+  };
+
+  const [showUIMarker, setShowUIMarker] = useState(() => {
+    try { return localStorage.getItem("rs_ui_marker_dismissed") !== "1"; } catch { return true; }
+  });
+
+  const dismissUIMarker = () => {
+    try { localStorage.setItem("rs_ui_marker_dismissed", "1"); } catch {}
+    setShowUIMarker(false);
   };
 
   if (showOnboarding) {
@@ -89,7 +124,16 @@ export default function Root() {
     <ErrorBoundary>
       <OfflineScreen />
       <APIErrorDisplay />
-      {appContent}
+      {showUIMarker && (
+        <div style={{ position:"fixed", left:12, right:12, top:12, zIndex:2000, display:"flex", justifyContent:"center" }}>
+          <div style={{ background: C.primary, color: "#fff", padding: "8px 14px", borderRadius: 12, boxShadow: "0 6px 18px rgba(0,0,0,0.06)", fontWeight:700, display:"flex", gap:12, alignItems:"center", fontFamily:"'Barlow',sans-serif" }}>
+            <div>Updated UI — progress-chart-v2</div>
+            <div style={{ fontSize:12, opacity:0.9 }}>{new Date().toLocaleString()}</div>
+            <button onClick={dismissUIMarker} style={{ marginLeft:8, border:"none", background:"rgba(255,255,255,0.14)", color:"#fff", padding:"6px 8px", borderRadius:8, cursor:"pointer", fontWeight:700 }}>Dismiss</button>
+          </div>
+        </div>
+      )}
+      <div style={{ paddingTop: showUIMarker ? 56 : 0 }}>{appContent}</div>
     </ErrorBoundary>
   );
 }
