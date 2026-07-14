@@ -1132,7 +1132,9 @@ export default function GymOwnerDashboard({ gymOwner, onLogout }) {
                                     fontWeight: 700,
                                     cursor: "pointer",
                                     whiteSpace: "nowrap",
-                                    transition: "all 0.2s"
+                                    transition: "all 0.2s",
+                                    minWidth: "auto",
+                                    width: "auto"
                                   }}
                                 >
                                   🔄 Renew
@@ -1153,7 +1155,9 @@ export default function GymOwnerDashboard({ gymOwner, onLogout }) {
                                       cursor: sendingReminderId === member.user_id ? "not-allowed" : "pointer",
                                       whiteSpace: "nowrap",
                                       transition: "all 0.2s",
-                                      opacity: sendingReminderId === member.user_id ? 0.6 : 1
+                                      opacity: sendingReminderId === member.user_id ? 0.6 : 1,
+                                      minWidth: "auto",
+                                      width: "auto"
                                     }}
                                   >
                                     {sendingReminderId === member.user_id ? "Sending..." : "📢 Remind"}
@@ -1174,7 +1178,9 @@ export default function GymOwnerDashboard({ gymOwner, onLogout }) {
                                       fontWeight: 700,
                                       cursor: "pointer",
                                       whiteSpace: "nowrap",
-                                      transition: "all 0.2s"
+                                      transition: "all 0.2s",
+                                      minWidth: "auto",
+                                      width: "auto"
                                     }}
                                   >
                                     ➕ Add Plan
