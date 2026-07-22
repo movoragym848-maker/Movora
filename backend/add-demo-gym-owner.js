@@ -27,7 +27,7 @@ async function addDemoGymOwner() {
     if (err.code === '23505') {
       console.log('⚠️  Demo gym owner already exists!');
       console.log('Email: gymowner@movora.com');
-      console.log('Password: demo123456');
+      console.log('Password: (not shown)');
     } else {
       console.error('❌ Error creating demo gym owner:', err.message);
     }
