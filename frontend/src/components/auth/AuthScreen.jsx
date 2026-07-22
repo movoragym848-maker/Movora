@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { generateOTP } from "../../utils/date";
 import { signup, login, signupGymOwner, loginGymOwner, checkGym, getRegisteredGyms, sendPhoneOTP, verifyPhoneOTP } from "../../services/api";
 import { AuthInput, authInputStyle } from "../common";
@@ -18,6 +18,7 @@ export default function AuthScreen({ onAuth }) {
   const [otpSent, setOtpSent] = useState(false);
   const [otpLoading, setOtpLoading] = useState(false);
   const [otpTimer, setOtpTimer] = useState(0);
+  const otpRequestRef = useRef(null);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -29,6 +30,19 @@ export default function AuthScreen({ onAuth }) {
         .catch(err => console.warn("Failed to fetch registered gyms:", err));
     }
   }, [mode]);
+
+  useEffect(() => {
+    console.log("AuthScreen mode changed", {
+      mode,
+      membershipMode,
+      pendingUser,
+      pendingGymOwner,
+      otpSent,
+      otpTimer,
+      otpLoading,
+      error,
+    });
+  }, [mode, membershipMode, pendingUser, pendingGymOwner, otpSent, otpTimer, otpLoading, error]);
 
   // OTP Timer countdown
   useEffect(() => {
@@ -85,19 +99,23 @@ export default function AuthScreen({ onAuth }) {
     if (membershipMode === "personal") {
       setPendingUser({ name:form.name.trim(), email:form.email.trim(), password:form.password, phone:form.phone.replace(/\D/g, ""), gymName: null, userType: "personal" });
       setOtpLoading(true);
+      otpRequestRef.current = "personal";
+      console.log("Sending OTP for personal signup", { phone: form.phone, requestSource: otpRequestRef.current });
       try {
         const res = await sendPhoneOTP(form.phone.replace(/\D/g, ""));
+        if (otpRequestRef.current !== "personal") return;
+        console.log("OTP send returned for personal signup", { res, requestSource: otpRequestRef.current });
         if (res?.mockOtp) setShownOtp(res.mockOtp);
         setOtpSent(true);
         setOtpTimer(120);
         setMode("otp");
         setForm(f => ({ ...f, otp: "" }));
-        // debug removed
       } catch (otpErr) {
+        if (otpRequestRef.current !== "personal") return;
+        console.log("OTP send failed for personal signup", { otpErr, requestSource: otpRequestRef.current });
         setError(otpErr.message || "Failed to send OTP. Please try again.");
-        // debug removed
       } finally {
-        setOtpLoading(false);
+        if (otpRequestRef.current === "personal") setOtpLoading(false);
       }
       return;
     }
@@ -112,16 +130,22 @@ export default function AuthScreen({ onAuth }) {
         
         setOtpLoading(true);
         try {
+          otpRequestRef.current = "gym_member";
+          console.log("Sending OTP for gym_member signup", { phone: form.phone, gymName: exactGymName, requestSource: otpRequestRef.current });
           const res = await sendPhoneOTP(form.phone.replace(/\D/g, ""));
+          if (otpRequestRef.current !== "gym_member") return;
+          console.log("OTP send returned for gym_member signup", { res, requestSource: otpRequestRef.current });
           if (res?.mockOtp) setShownOtp(res.mockOtp);
           setOtpSent(true);
           setOtpTimer(120);
           setMode("otp");
           setForm(f => ({ ...f, otp: "" }));
         } catch (otpErr) {
+          if (otpRequestRef.current !== "gym_member") return;
+          console.log("OTP send failed for gym_member signup", { otpErr, requestSource: otpRequestRef.current });
           setError(otpErr.message || "Failed to send OTP. Please try again.");
         } finally {
-          setOtpLoading(false);
+          if (otpRequestRef.current === "gym_member") setOtpLoading(false);
         }
       } catch (err) {
         setError(err.message || "Failed to verify gym registration.");
@@ -206,16 +230,22 @@ export default function AuthScreen({ onAuth }) {
     setPendingGymOwner(details);
     setOtpLoading(true);
     try {
+      otpRequestRef.current = "gymSignup";
+      console.log("Sending OTP for gym signup", { details: { gymName: details.gymName, phone: details.phone }, requestSource: otpRequestRef.current });
       const res = await sendPhoneOTP(details.phone);
+      if (otpRequestRef.current !== "gymSignup") return;
+      console.log("OTP send returned for gym signup", { res, requestSource: otpRequestRef.current });
       if (res?.mockOtp) setShownOtp(res.mockOtp);
       setOtpSent(true);
       setOtpTimer(120);
       setMode("otp");
       setForm(f => ({ ...f, otp: "" }));
     } catch (otpErr) {
+      if (otpRequestRef.current !== "gymSignup") return;
+      console.log("OTP send failed for gym signup", { otpErr, requestSource: otpRequestRef.current });
       setError(otpErr.message || "Failed to send OTP. Please try again.");
     } finally {
-      setOtpLoading(false);
+      if (otpRequestRef.current === "gymSignup") setOtpLoading(false);
     }
   };
 
@@ -227,6 +257,68 @@ export default function AuthScreen({ onAuth }) {
     } catch (err) {
       setError(err.message || "Gym owner login failed.");
     }
+  };
+
+  const cancelOtpFlow = () => {
+    console.log("Cancelling OTP flow", {
+      mode,
+      membershipMode,
+      pendingUser,
+      pendingGymOwner,
+      otpSent,
+      otpTimer,
+      otpLoading,
+      error,
+      otpRequest: otpRequestRef.current,
+    });
+    otpRequestRef.current = false;
+    setOtpLoading(false);
+    setOtpSent(false);
+    setOtpTimer(0);
+  };
+
+  const handleOtpBack = (e) => {
+    if (e?.preventDefault) e.preventDefault();
+    if (e?.stopPropagation) e.stopPropagation();
+    console.log("OTP back clicked", {
+      mode,
+      membershipMode,
+      pendingUser,
+      pendingGymOwner,
+      otpSent,
+      otpTimer,
+      otpLoading,
+      error,
+    });
+    cancelOtpFlow();
+    if (pendingGymOwner) {
+      setMode("gymSignup");
+      setPendingGymOwner(null);
+    } else {
+      setMode("signup");
+      setPendingUser(null);
+    }
+    setError("");
+  };
+
+  const handleMembershipBack = (e) => {
+    if (e?.preventDefault) e.preventDefault();
+    if (e?.stopPropagation) e.stopPropagation();
+    console.log("Membership mode back clicked", {
+      mode,
+      membershipMode,
+      pendingUser,
+      pendingGymOwner,
+      otpSent,
+      otpTimer,
+      otpLoading,
+      error,
+    });
+    cancelOtpFlow();
+    setMode("signup");
+    setMembershipMode(null);
+    setError("");
+    setForm(f => ({ ...f, gymName: "" }));
   };
 
   const copyOtp = () => {
@@ -424,18 +516,7 @@ export default function AuthScreen({ onAuth }) {
                 letterSpacing:0.5, marginBottom:10, opacity: form.otp.length === 6 ? 1 : 0.6, 
                 pointerEvents: form.otp.length === 6 ? "auto" : "none"
               }} disabled={form.otp.length !== 6}>Verify &amp; Create Account</button>
-              <button type="button" onClick={() => { 
-                if (pendingGymOwner) {
-                  setMode("gymSignup");
-                  setPendingGymOwner(null);
-                } else {
-                  setMode("signup");
-                  setPendingUser(null);
-                }
-                setError(""); 
-                setOtpSent(false); 
-                setOtpTimer(0); 
-              }} className="auth-button" style={{
+              <button type="button" onClick={handleOtpBack} className="auth-button" style={{
                 width:"100%", background:"transparent", border:"1.5px solid #DBEAFE",
                 borderRadius:9, padding:"11px", color:"#93A8C8", fontSize:14, fontWeight:700,
                 cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", textTransform:"uppercase",
@@ -554,7 +635,7 @@ export default function AuthScreen({ onAuth }) {
                   <div style={{ width:40, height:40, background:"#DBEAFE", borderRadius:10, display:"flex",
                     alignItems:"center", justifyContent:"center", fontSize:18, flexShrink:0 }}>🏢</div>
                   <div style={{ flex:1 }}>
-                    <div style={{ fontWeight:700, color:"#1E3A5F", fontSize:15 }}>Join Gym</div>
+                    <div style={{ fontWeight:700, color:"#1E3A5F", fontSize:15 }}>Member of a registered gym</div>
                     <div style={{ fontSize:12, color:"#93A8C8", marginTop:3 }}>Member of a registered gym</div>
                   </div>
                   {membershipMode === "gym_member" && <div style={{ fontSize:20 }}>✓</div>}
@@ -592,7 +673,7 @@ export default function AuthScreen({ onAuth }) {
                 textTransform:"uppercase", letterSpacing:0.5, marginBottom:16,
                 opacity: otpLoading ? 0.7 : 1, pointerEvents: otpLoading || !membershipMode ? "none" : "auto"
               }} disabled={otpLoading || !membershipMode}>{otpLoading ? "Sending OTP..." : "Send OTP & Continue →"}</button>
-              <button type="button" onClick={() => { setMode("signup"); setMembershipMode(null); setError(""); setForm(f => ({ ...f, gymName: "" })); }} style={{
+              <button type="button" onClick={handleMembershipBack} style={{
                 width:"100%", background:"transparent", border:"1.5px solid #DBEAFE",
                 borderRadius:9, padding:"11px", color:"#93A8C8", fontSize:14, fontWeight:700,
                 cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", textTransform:"uppercase",

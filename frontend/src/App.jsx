@@ -8,6 +8,7 @@ import CalSetupModal from "./components/diet/CalSetupModal";
 import FoodPickerModal from "./components/diet/FoodPickerModal";
 import UserAdminDashboard from "./components/admin/UserAdminDashboard";
 import ErrorBoundary from "./components/error/ErrorBoundary";
+import SettingsPagesModal from "./components/common/SettingsPagesModal";
 import * as api from "./services/api";
 
 export default function App({ user, onLogout }) {
@@ -33,8 +34,12 @@ export default function App({ user, onLogout }) {
     saveLS("rs_tab", tab);
   }, [tab, email]);
 
-  // Demo data: 8 exercises today, 5 workouts this week, 18.4t volume, 2350 calories
+  // Demo data for one specific demo account
+  const DEMO_USER_EMAIL = "demo@movora.com";
+  const isDemoAccount = email === DEMO_USER_EMAIL;
+  
   const createDemoLogs = () => {
+    if (!isDemoAccount) return [];
     const today = new Date();
     const todayStr = today.toISOString();
     const day1 = new Date(today.getTime() - 1*86400000).toISOString();
@@ -64,6 +69,7 @@ export default function App({ user, onLogout }) {
   };
 
   const createDemoCalories = (todayStr) => {
+    if (!isDemoAccount) return {};
     return {
       [todayStr]: {
         Breakfast: [{ id: 1, name: "Oats + Milk", cal: 450, qty: 1, unit: "1 bowl", baseCal: 450 }],
@@ -137,6 +143,7 @@ export default function App({ user, onLogout }) {
   const [calProfile, setCalProfile] = useState(() => LS(`rs_calprofile_${email}`));
   const [showCalSetup, setShowCalSetup] = useState(false);
   const [showFoodPicker, setShowFoodPicker] = useState(false);
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [activeMeal, setActiveMeal] = useState("Breakfast");
   const [manualName, setManualName] = useState("");
   const [manualCal, setManualCal] = useState("");
@@ -202,6 +209,9 @@ export default function App({ user, onLogout }) {
 
   // Hydrate user data from backend database on mount
   useEffect(() => {
+    // Skip API call for demo account - keep demo data
+    if (isDemoAccount) return;
+
     let active = true;
     api.hydrateUserData()
       .then(data => {
@@ -319,12 +329,18 @@ export default function App({ user, onLogout }) {
 
   return (
     <ErrorBoundary showHomeButton={true} onHome={() => setTab("dashboard")}>
-      <div style={{ minHeight:"100vh", background:C.bg, fontFamily:"'Barlow',sans-serif", paddingBottom:84, overflowX:"hidden" }}>
+      <div style={{ minHeight:"100dvh", background:C.bg, fontFamily:"'Barlow',sans-serif", paddingBottom:`calc(96px + env(safe-area-inset-bottom, 0px))`, overflowX:"hidden" }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@600;700;800&display=swap');
+        :root {
+          --app-safe-area-top: env(safe-area-inset-top, 0px);
+          --app-safe-area-bottom: env(safe-area-inset-bottom, 0px);
+          --app-bottom-nav-bg: #FFFFFF;
+        }
         *{box-sizing:border-box}
         html, body, #root, #root > div { width:100%; max-width:100%; min-width:0; overflow-x:hidden; }
-        body { overflow-x:hidden; }
+        body { overflow-x:hidden; background:#F3F4F6; }
+        #root { min-height:100dvh; }
         .app-content-wrapper { width:min(100%,680px); max-width:100%; }
         .app-content-wrapper, .app-content-wrapper * { max-width:100%; box-sizing:border-box; }
         .app-header, .bottom-nav-bar, .calorie-header-flex, .gym-search-container, .weight-stats-grid, .dashboard-stats-grid, .meal-cards-grid, .profile-grid { overflow-x:hidden; }
@@ -401,14 +417,14 @@ export default function App({ user, onLogout }) {
           left: 0;
           right: 0;
           width: 100%;
-          background: #ffffff;
+          background: var(--app-bottom-nav-bg);
           border-top: 1px solid rgba(229, 231, 235, 0.9);
           box-shadow: 0 -4px 20px rgba(15, 23, 42, 0.08);
           z-index: 50;
           display: flex !important;
           align-items: flex-start;
           justify-content: space-around;
-          padding: 16px 0 20px;
+          padding: 12px 0 calc(10px + var(--app-safe-area-bottom));
           overflow-x: hidden;
         }
         .bottom-nav-bar button {
@@ -493,7 +509,7 @@ export default function App({ user, onLogout }) {
             margin: 0 auto !important;
           }
           .bottom-nav-bar {
-            padding: 18px 0 16px !important;
+            padding: 14px 0 calc(10px + var(--app-safe-area-bottom)) !important;
           }
           .bottom-nav-bar button {
             padding: 20px 0 20px !important;
@@ -1340,15 +1356,25 @@ export default function App({ user, onLogout }) {
               </div>
             </div>
 
-            <button onClick={onLogout}
-              onMouseEnter={e => { e.currentTarget.style.background=hoverBg; e.currentTarget.style.color="#c0392b"; }}
-              onMouseLeave={e => { e.currentTarget.style.background="transparent"; e.currentTarget.style.color=C.red; }}
-              style={{ marginTop:6, width:"100%", background:"transparent", border:`1px solid ${C.red}`,
-                borderRadius:8, padding:"11px 20px", color:C.red, fontSize:14, fontWeight:700,
-                cursor:"pointer", letterSpacing:0.5, fontFamily:"'Barlow Condensed',sans-serif",
-                textTransform:"uppercase", transition:"background 0.2s, color 0.2s" }}>
-              Sign out
-            </button>
+            <div style={{ display:"flex", flexDirection:"column", gap:10, marginTop:6 }}>
+              <button onClick={() => setShowSettingsModal(true)}
+                style={{ width:"100%", background:"transparent", border:`1px solid ${C.primary}`,
+                  borderRadius:8, padding:"11px 20px", color:C.primary, fontSize:14, fontWeight:700,
+                  cursor:"pointer", letterSpacing:0.5, fontFamily:"'Barlow Condensed',sans-serif",
+                  textTransform:"uppercase", transition:"background 0.2s, color 0.2s" }}>
+                Settings
+              </button>
+
+              <button onClick={onLogout}
+                onMouseEnter={e => { e.currentTarget.style.background=hoverBg; e.currentTarget.style.color="#c0392b"; }}
+                onMouseLeave={e => { e.currentTarget.style.background="transparent"; e.currentTarget.style.color=C.red; }}
+                style={{ width:"100%", background:"transparent", border:`1px solid ${C.red}`,
+                  borderRadius:8, padding:"11px 20px", color:C.red, fontSize:14, fontWeight:700,
+                  cursor:"pointer", letterSpacing:0.5, fontFamily:"'Barlow Condensed',sans-serif",
+                  textTransform:"uppercase", transition:"background 0.2s, color 0.2s" }}>
+                Sign out
+              </button>
+            </div>
           </>
         )}
 
@@ -1366,7 +1392,7 @@ export default function App({ user, onLogout }) {
       </div>
 
       {/* Bottom Nav */}
-      <div className="bottom-nav-bar" style={{ background:C.card, borderTop:`1px solid ${C.border}`, boxShadow:"0 -1px 12px rgba(59,130,246,0.06)", padding:"16px 0 20px" }}>
+      <div className="bottom-nav-bar" style={{ background:C.card, borderTop:`1px solid ${C.border}`, boxShadow:"0 -1px 12px rgba(59,130,246,0.06)" }}>
         {navItems.map(({ id, icon, label }) => (
           <button key={id} onClick={() => setTab(id)} style={{
             flex:1, background:"none", border:"none", cursor:"pointer", padding:"18px 0 20px",
@@ -1403,6 +1429,7 @@ export default function App({ user, onLogout }) {
         }));
       }} goal={goal} initial={calProfile}/>}
       {showFoodPicker && <FoodPickerModal meal={activeMeal} onAdd={item => addFood(activeMeal, item)} onClose={() => setShowFoodPicker(false)} />}
+      {showSettingsModal && <SettingsPagesModal onClose={() => setShowSettingsModal(false)} />}
       </div>
     </ErrorBoundary>
   );

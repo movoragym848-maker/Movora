@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { getGymMembers, sendMemberReminder, renewGymMember, addGymMember } from "../../services/api";
 import { MEMBERSHIP_PLANS } from "../../constants/membership";
+import SettingsPagesModal from "../common/SettingsPagesModal";
 
 
 const MEMBERSHIP_FEE = 1000; // Rs per month
@@ -19,7 +20,8 @@ const C = {
 };
 
 // ========== DEMO DATA GENERATION ==========
-const generateDemoMembers = () => {
+const generateDemoMembers = (shouldGenerate) => {
+  if (!shouldGenerate) return [];
   const firstNames = [
     "Raj", "Priya", "Amit", "Neha", "Vikram", "Pooja", "Arjun", "Divya", "Sanjay", "Anjali",
     "Rohan", "Kavya", "Nikhil", "Shreya", "Arun", "Ananya", "Rahul", "Diya", "Sameer", "Riya",
@@ -118,8 +120,12 @@ const generateDemoMembers = () => {
   return members;
 };
 
+// Demo gym owner email
+const DEMO_GYM_OWNER_EMAIL = "gymowner@movora.com";
+
 // Generate earnings data
-const generateDemoEarnings = () => {
+const generateDemoEarnings = (shouldGenerate) => {
+  if (!shouldGenerate) return [];
   const earnings = [];
   const today = new Date();
   const currentYear = today.getFullYear();
@@ -185,8 +191,13 @@ const generateDemoEarnings = () => {
 };
 
 export default function GymOwnerDashboard({ gymOwner, onLogout }) {
+  const isDemoGymOwner = gymOwner?.email === DEMO_GYM_OWNER_EMAIL;
   const [activeTab, setActiveTab] = useState("admin"); // "admin", "members", or "profile"
-  const [members, setMembers] = useState([]);
+  const [members, setMembers] = useState(() => {
+    // Initialize with demo data if it's a demo account
+    if (isDemoGymOwner) return generateDemoMembers(true);
+    return [];
+  });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
@@ -196,6 +207,7 @@ export default function GymOwnerDashboard({ gymOwner, onLogout }) {
   const [reminderError, setReminderError] = useState(null);
   const [earnings, setEarnings] = useState(() => {
     const stored = localStorage.getItem(`gym_earnings_${gymOwner?.gym_id}`);
+    if (isDemoGymOwner) return generateDemoEarnings(true);
     if (stored) {
       return JSON.parse(stored);
     }
@@ -211,6 +223,7 @@ export default function GymOwnerDashboard({ gymOwner, onLogout }) {
   const [toastNotification, setToastNotification] = useState(null);
 
   const [showAddMemberModal, setShowAddMemberModal] = useState(false);
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [newMemberForm, setNewMemberForm] = useState({
     firstName: "",
     lastName: "",
@@ -228,19 +241,28 @@ export default function GymOwnerDashboard({ gymOwner, onLogout }) {
     setLoading(true);
     setError("");
     try {
+      // Load demo members for demo gym owner
+      if (isDemoGymOwner) {
+        const demoMembers = generateDemoMembers(true);
+        setMembers(demoMembers);
+        return;
+      }
+      
       const membersData = await getGymMembers();
       // If no real members, use demo data
       if (!membersData || membersData.length === 0) {
-        const demoMembers = generateDemoMembers();
+        const demoMembers = generateDemoMembers(false);
         setMembers(demoMembers);
       } else {
         setMembers(membersData);
       }
     } catch (err) {
       console.error("Failed to load members", err);
-      // Use demo data on error
-      const demoMembers = generateDemoMembers();
-      setMembers(demoMembers);
+      // Use demo data on error only for non-demo accounts
+      if (!isDemoGymOwner) {
+        const demoMembers = generateDemoMembers(false);
+        setMembers(demoMembers);
+      }
     } finally {
       setLoading(false);
     }
@@ -1040,8 +1062,6 @@ export default function GymOwnerDashboard({ gymOwner, onLogout }) {
                       <tr>
                         <th>Name</th>
                         <th>Plan</th>
-                        <th>Start</th>
-                        <th>End</th>
                         <th>Days Left</th>
                         <th>Status</th>
                         <th>Action</th>
@@ -1069,25 +1089,25 @@ export default function GymOwnerDashboard({ gymOwner, onLogout }) {
                             >
                               {member.name}
                               {hasNoMembership && (
-                                <span style={{ 
-                                  marginLeft: 8, 
-                                  padding: "2px 8px", 
-                                  background: "#FCD34D", 
+                                <div style={{ 
+                                  display: 'block',
+                                  marginTop: 4,
+                                  padding: "2px 6px", 
+                                  background: "#FDEBC7", 
                                   color: "#92400E",
                                   borderRadius: 4,
                                   fontSize: 10,
                                   fontWeight: 700,
-                                  textTransform: "uppercase"
+                                  textTransform: "uppercase",
+                                  letterSpacing: 0.5
                                 }}>
-                                  ⚠ No Membership
-                                </span>
+                                  NO MEMBERSHIP
+                                </div>
                               )}
                             </td>
                             <td style={{ color: hasNoMembership ? "#F59E0B" : "inherit", fontWeight: hasNoMembership ? 700 : 500 }}>
-                              {member.plan}
+                              {member.plan === "-" ? "No Plan" : member.plan}
                             </td>
-                            <td>{formatDate(member.start_date)}</td>
-                            <td>{formatDate(member.expiry_date)}</td>
                             <td>
                               {hasNoMembership ? (
                                 <span style={{ color: "#F59E0B", fontWeight: 700 }}>Pending</span>
@@ -1140,27 +1160,32 @@ export default function GymOwnerDashboard({ gymOwner, onLogout }) {
                                   🔄 Renew
                                 </button>
                               ) : hasNoMembership ? (
-                                <div style={{ display: "flex", gap: 6 }}>
+                                <div style={{ display: "flex", gap: 6, flexDirection: 'row', alignItems: 'center' }}>
                                   <button
                                     onClick={() => handleSendReminder(member, "members_table")}
                                     disabled={sendingReminderId === member.user_id}
+                                    title="Send reminder"
                                     style={{
-                                      padding: "5px 10px",
+                                      width: 34,
+                                      height: 30,
+                                      padding: '0 6px',
                                       background: sendingReminderId === member.user_id ? C.muted : C.warning,
                                       color: "white",
                                       border: "none",
                                       borderRadius: 6,
-                                      fontSize: 12,
+                                      fontSize: 14,
                                       fontWeight: 700,
                                       cursor: sendingReminderId === member.user_id ? "not-allowed" : "pointer",
-                                      whiteSpace: "nowrap",
-                                      transition: "all 0.2s",
+                                      display: "inline-flex",
+                                      alignItems: "center",
+                                      justifyContent: "center",
+                                      transition: "all 0.15s",
                                       opacity: sendingReminderId === member.user_id ? 0.6 : 1,
                                       minWidth: "auto",
-                                      width: "auto"
+                                      width: "auto",
                                     }}
                                   >
-                                    {sendingReminderId === member.user_id ? "Sending..." : "📢 Remind"}
+                                    {sendingReminderId === member.user_id ? "..." : "📢"}
                                   </button>
                                   <button
                                     onClick={() => {
@@ -1168,22 +1193,27 @@ export default function GymOwnerDashboard({ gymOwner, onLogout }) {
                                       setSelectedAddPlan("monthly");
                                       setShowAddMembershipModal(true);
                                     }}
+                                    title="Add plan"
                                     style={{
-                                      padding: "5px 10px",
+                                      width: 34,
+                                      height: 30,
+                                      padding: '0 6px',
                                       background: C.success,
                                       color: "white",
                                       border: "none",
                                       borderRadius: 6,
-                                      fontSize: 12,
+                                      fontSize: 14,
                                       fontWeight: 700,
                                       cursor: "pointer",
-                                      whiteSpace: "nowrap",
-                                      transition: "all 0.2s",
+                                      display: "inline-flex",
+                                      alignItems: "center",
+                                      justifyContent: "center",
+                                      transition: "all 0.15s",
                                       minWidth: "auto",
-                                      width: "auto"
+                                      width: "auto",
                                     }}
                                   >
-                                    ➕ Add Plan
+                                    ➕
                                   </button>
                                 </div>
                               ) : (
@@ -1618,6 +1648,28 @@ export default function GymOwnerDashboard({ gymOwner, onLogout }) {
               </button>
 
               <button 
+                onClick={() => setShowSettingsModal(true)}
+                style={{
+                  padding: "12px 18px",
+                  background: "transparent",
+                  color: C.primary,
+                  border: `2px solid ${C.primary}`,
+                  borderRadius: 20,
+                  fontSize: 13,
+                  fontWeight: 700,
+                  cursor: "pointer",
+                  transition: "all 0.2s",
+                  fontFamily: "'Barlow Condensed', sans-serif",
+                  textTransform: "uppercase",
+                  letterSpacing: 0.5
+                }}
+                onMouseEnter={e => { e.target.style.background = C.primary; e.target.style.color = "white"; }}
+                onMouseLeave={e => { e.target.style.background = "transparent"; e.target.style.color = C.primary; }}
+              >
+                Settings
+              </button>
+
+              <button 
                 onClick={onLogout}
                 style={{
                   padding: "12px 18px",
@@ -1639,6 +1691,8 @@ export default function GymOwnerDashboard({ gymOwner, onLogout }) {
                 Sign Out
               </button>
             </div>
+
+            {showSettingsModal && <SettingsPagesModal onClose={() => setShowSettingsModal(false)} />}
 
             {/* Account Modal */}
             {showAccountModal && (

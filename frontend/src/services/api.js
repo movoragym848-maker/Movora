@@ -7,7 +7,7 @@ if (typeof window !== "undefined") {
 
 function isNetworkError(err) {
   const msg = err?.message?.toLowerCase() || "";
-  return msg.includes("failed to fetch") || msg.includes("network") || msg.includes("offline") || msg.includes("dns") || msg.includes("timeout");
+  return msg.includes("failed to fetch") || msg.includes("network") || msg.includes("offline") || msg.includes("dns") || msg.includes("timeout") || msg.includes("no internet");
 }
 
 function delay(ms) {
@@ -93,26 +93,29 @@ export async function request(path, options = {}, retryCount = 0) {
     return data;
   } catch (err) {
     const message = err?.message || "Unknown error";
-    const shouldRetry = (message.includes("Failed to fetch") || message.includes("Network") || message.includes("timeout") || message.includes("DNS")) && retryCount === 0;
+    const normalizedMessage = message.toLowerCase();
+    const shouldRetry = (normalizedMessage.includes("failed to fetch") || normalizedMessage.includes("network") || normalizedMessage.includes("timeout") || normalizedMessage.includes("dns")) && retryCount === 0;
 
     if (shouldRetry) {
       await delay(500);
       return request(path, options, retryCount + 1);
     }
 
-    if (message.includes("Failed to fetch") || message.includes("Network") || message.includes("timeout") || message.includes("DNS")) {
-      const networkError = new Error(`Network error contacting ${fullUrl}: ${message}`);
+    if (normalizedMessage.includes("no internet") || !navigator.onLine) {
+      const offlineError = new Error("No internet connection. Please check your network and try again.");
+      offlineError.isNetworkError = true;
+      offlineError.url = fullUrl;
+      throw offlineError;
+    }
+
+    if (normalizedMessage.includes("failed to fetch") || normalizedMessage.includes("network") || normalizedMessage.includes("timeout") || normalizedMessage.includes("dns")) {
+      const networkError = new Error(`Network error contacting ${fullUrl}. Please check your connection.`);
       networkError.isNetworkError = true;
       networkError.url = fullUrl;
       networkError.originalMessage = message;
       throw networkError;
     }
-    if (message.includes("No internet")) {
-      const offlineError = new Error(`No internet connection. Please check your network. (${fullUrl})`);
-      offlineError.isNetworkError = true;
-      offlineError.url = fullUrl;
-      throw offlineError;
-    }
+
     err.url = fullUrl;
     throw err;
   }

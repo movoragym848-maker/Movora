@@ -93,10 +93,6 @@ export default function ProgressChart({ logs, exercise }) {
           </div>
         )}
       </div>
-
-      <div style={{ marginTop:8, fontSize:12, color:C.muted }}>
-        <strong style={{ color:C.dark }}>UI:</strong> progress-chart-v2 — rendered at {new Date().toLocaleString()}
-      </div>
     </>
   );
 }

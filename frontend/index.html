@@ -4,6 +4,7 @@
     <meta charset="UTF-8" />
     <meta http-equiv="X-UA-Compatible" content="ie=edge" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#FFFFFF" />
     <meta name="permissions-policy" content="accelerometer=(), gyroscope=(), magnetometer=(), usb=()" />
     <title>Movora - Gym Management</title>
     <!-- Tabler Icons -->
@@ -24,6 +25,25 @@
         body {
             font-family: 'Barlow', sans-serif;
             background-color: #F3F4F6;
+        }
+
+        button,
+        a,
+        input,
+        select,
+        textarea {
+            -webkit-tap-highlight-color: transparent;
+            tap-highlight-color: transparent;
+            outline: none;
+        }
+
+        button:focus-visible,
+        a:focus-visible,
+        input:focus-visible,
+        select:focus-visible,
+        textarea:focus-visible {
+            outline: none;
+            box-shadow: none;
         }
         
         #root {

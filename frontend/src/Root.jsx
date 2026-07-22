@@ -97,15 +97,6 @@ export default function Root() {
     setShowOnboarding(false);
   };
 
-  const [showUIMarker, setShowUIMarker] = useState(() => {
-    try { return localStorage.getItem("rs_ui_marker_dismissed") !== "1"; } catch { return true; }
-  });
-
-  const dismissUIMarker = () => {
-    try { localStorage.setItem("rs_ui_marker_dismissed", "1"); } catch {}
-    setShowUIMarker(false);
-  };
-
   if (showOnboarding) {
     return (
       <ErrorBoundary>
@@ -124,16 +115,7 @@ export default function Root() {
     <ErrorBoundary>
       <OfflineScreen />
       <APIErrorDisplay />
-      {showUIMarker && (
-        <div style={{ position:"fixed", left:12, right:12, top:12, zIndex:2000, display:"flex", justifyContent:"center" }}>
-          <div style={{ background: C.primary, color: "#fff", padding: "8px 14px", borderRadius: 12, boxShadow: "0 6px 18px rgba(0,0,0,0.06)", fontWeight:700, display:"flex", gap:12, alignItems:"center", fontFamily:"'Barlow',sans-serif" }}>
-            <div>Updated UI — progress-chart-v2</div>
-            <div style={{ fontSize:12, opacity:0.9 }}>{new Date().toLocaleString()}</div>
-            <button onClick={dismissUIMarker} style={{ marginLeft:8, border:"none", background:"rgba(255,255,255,0.14)", color:"#fff", padding:"6px 8px", borderRadius:8, cursor:"pointer", fontWeight:700 }}>Dismiss</button>
-          </div>
-        </div>
-      )}
-      <div style={{ paddingTop: showUIMarker ? 56 : 0 }}>{appContent}</div>
+      <div>{appContent}</div>
     </ErrorBoundary>
   );
 }
