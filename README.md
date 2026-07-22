@@ -16,7 +16,7 @@ This folder contains the split React frontend and a production-style Express/Pos
 Your original URL has spaces, so it must be URL-encoded:
 
 ```env
-DATABASE_URL=postgresql://postgres:aryan%207106@localhost:5432/RS%20Fitness
+DATABASE_URL=postgresql://<USER>:<PASSWORD>@<HOST>:5432/<DB_NAME>
 ```
 
 ## Run Backend
