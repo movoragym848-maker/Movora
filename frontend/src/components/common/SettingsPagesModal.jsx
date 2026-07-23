@@ -37,7 +37,9 @@ const pages = [
       "For technical support, please include your registered email address, phone number, a brief description of the issue, and any relevant screenshots if available.",
       "We aim to respond as quickly as possible and help resolve account, access, or service-related concerns.",
       "Email: movoragym848@gmail.com",
-      "Support is available for account help, feature questions, membership concerns, and general service assistance."
+      "Support is available for account help, feature questions, membership concerns, and general service assistance.",
+      "Request Account and Data Deletion: To request deletion of your Movora account and associated personal data, email movoragym848@gmail.com from your registered email address. Include your account name and registered phone number so we can verify and process your request.",
+      "We will process verified deletion requests within 30 days. Account profile information, contact details, fitness data, membership data, and other personal data associated with the account will be deleted unless retention is required by law. Payment and invoice records may be retained for the legally required period."
     ]
   }
 ];
