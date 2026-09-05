@@ -195,6 +195,47 @@ export async function getGymMembers(req, res, next) {
   }
 }
 
+export async function getGymAttendance(req, res, next) {
+  try {
+    if (req.user.role !== "gym_owner") {
+      return res.status(403).json({ message: "Access forbidden. Gym owner role required." });
+    }
+
+    const requestedDate = req.query.date || new Date().toISOString().slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(requestedDate)) {
+      return res.status(400).json({ message: "date must use YYYY-MM-DD format" });
+    }
+
+    const { rows } = await query(
+      `SELECT
+        a.id,
+        a.timestamp as check_in_at,
+        a.status,
+        u.id as user_id,
+        u.name,
+        u.phone,
+        COALESCE(m.plan_label, 'No Plan') as plan
+       FROM attendance a
+       JOIN registered_gyms g ON g.gym_id = a.gym_id AND g.gym_owner_id = $1
+       JOIN users u ON u.id = a.user_id
+       LEFT JOIN LATERAL (
+         SELECT plan_label
+         FROM memberships
+         WHERE user_id = u.id AND gym_name = g.name
+         ORDER BY expiry_date DESC NULLS LAST
+         LIMIT 1
+       ) m ON true
+       WHERE (a.timestamp AT TIME ZONE 'UTC')::date = $2::date
+       ORDER BY a.timestamp DESC`,
+      [req.user.sub, requestedDate]
+    );
+
+    res.json(rows);
+  } catch (err) {
+    next(err);
+  }
+}
+
 export async function logoutGymOwner(req, res, next) {
   try {
     if (req.body?.refreshToken) {
@@ -565,5 +606,81 @@ export async function addGymMember(req, res, next) {
     next(err);
   }
 }
+
+export async function updateGymMember(req, res, next) {
+  try {
+    if (req.user.role !== "gym_owner") {
+      return res.status(403).json({ message: "Access forbidden. Gym owner role required." });
+    }
+    const { userId, firstName, lastName, email, phone } = req.body;
+    if (!userId || !firstName?.trim() || !lastName?.trim() || !email?.trim() || !phone?.trim()) {
+      return res.status(400).json({ message: "All member profile fields are required." });
+    }
+    const cleanPhone = phone.replace(/\D/g, '');
+    if (!/^[6-9]\d{9}$/.test(cleanPhone)) {
+      return res.status(400).json({ message: "Invalid Indian phone number. Must be 10 digits starting with 6-9." });
+    }
+    const { rows: ownerRows } = await query("SELECT gym_name FROM gym_owners WHERE id = $1", [req.user.sub]);
+    if (ownerRows.length === 0) return res.status(404).json({ message: "Gym owner not found." });
+    const duplicate = await query(
+      "SELECT 1 FROM users WHERE (email = $1 OR phone = $2) AND id <> $3",
+      [email.trim().toLowerCase(), cleanPhone, userId]
+    );
+    if (duplicate.rowCount > 0) return res.status(409).json({ message: "Email or phone number is already registered." });
+    const updated = await query(
+      `UPDATE users SET name = $1, email = $2, phone = $3
+       WHERE id = $4 AND gym_name = $5 AND user_type = 'gym_member'
+       RETURNING id AS user_id, name, email, phone`,
+      [`${firstName.trim()} ${lastName.trim()}`, email.trim().toLowerCase(), cleanPhone, userId, ownerRows[0].gym_name]
+    );
+    if (updated.rowCount === 0) return res.status(404).json({ message: "Member not found in your gym." });
+    return res.json(updated.rows[0]);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function cancelGymMember(req, res, next) {
+  try {
+    if (req.user.role !== "gym_owner") {
+      return res.status(403).json({ message: "Access forbidden. Gym owner role required." });
+    }
+    const gymOwnerId = req.user.sub;
+    const { userId } = req.body;
+    if (!userId) {
+      return res.status(400).json({ message: "userId is required" });
+    }
+
+    // Get gym name from gym owner
+    const { rows: ownerRows } = await query("SELECT gym_name FROM gym_owners WHERE id = $1", [gymOwnerId]);
+    if (ownerRows.length === 0) {
+      return res.status(404).json({ message: "Gym owner not found." });
+    }
+    const gymName = ownerRows[0].gym_name;
+
+    // Check if user exists in the database
+    let userExists = false;
+    const isUuid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(userId);
+    if (isUuid) {
+      const { rowCount } = await query("SELECT 1 FROM users WHERE id = $1", [userId]);
+      userExists = rowCount > 0;
+    }
+
+    if (!userExists) {
+      return res.json({ ok: true, message: "Membership cancelled successfully (Demo Mode)" });
+    }
+
+    // Set membership status to expired and expiry_date to yesterday
+    await query(
+      "UPDATE memberships SET status = 'expired', expiry_date = CURRENT_DATE - INTERVAL '1 day' WHERE user_id = $1 AND gym_name = $2 AND status = 'active'",
+      [userId, gymName]
+    );
+
+    res.json({ ok: true, message: "Membership cancelled successfully" });
+  } catch (err) {
+    next(err);
+  }
+}
+
 
 

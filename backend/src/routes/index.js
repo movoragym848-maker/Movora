@@ -8,6 +8,7 @@ import { meRoutes } from "./meRoutes.js";
 import { nutritionRoutes } from "./nutritionRoutes.js";
 import { workoutRoutes } from "./workoutRoutes.js";
 import { aiRoutes } from "./aiRoutes.js";
+import { attendanceRoutes } from "./attendanceRoutes.js";
 
 export const routes = Router();
 
@@ -21,3 +22,4 @@ routes.use("/body", requireAuth, bodyRoutes);
 routes.use("/nutrition", requireAuth, nutritionRoutes);
 routes.use("/goal", requireAuth, goalRoutes);
 routes.use("/ai", requireAuth, aiRoutes);
+routes.use("/v1/attendance", attendanceRoutes);
