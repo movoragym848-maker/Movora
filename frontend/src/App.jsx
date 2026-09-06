@@ -1,7 +1,7 @@
 import { useState, useEffect, useLayoutEffect, useRef, useMemo } from "react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from "recharts";
 import { C, EXERCISES, EXERCISE_VIDEOS, MEAL_EMOJI } from "./constants/data";
-import { Avatar, Field, PrimaryBtn, SectionTitle, StatCard, TextInput } from "./components/common";
+import { Avatar, Field, PrimaryBtn, SectionTitle, StatCard, TextInput, ConfettiCanvas } from "./components/common";
 import LogModal from "./components/workouts/LogModal";
 import ProgressChart from "./components/workouts/ProgressChart";
 import CalSetupModal from "./components/diet/CalSetupModal";
@@ -10,6 +10,7 @@ import UserAdminDashboard from "./components/admin/UserAdminDashboard";
 import ErrorBoundary from "./components/error/ErrorBoundary";
 import SettingsPagesModal from "./components/common/SettingsPagesModal";
 import * as api from "./services/api";
+import CheckInScreen from "./components/check-in/CheckInScreen";
 
 export default function App({ user, onLogout }) {
   if (!user || !user.email) {
@@ -25,6 +26,7 @@ export default function App({ user, onLogout }) {
   const [tab, setTab] = useState(() => {
     return LS(`rs_tab_${email}`) || LS("rs_tab") || "dashboard";
   });
+  const [celebrating, setCelebrating] = useState(false);
   const [goal, setGoal] = useState(() => {
     return LS(`rs_goal_${email}`) || "bulking";
   });
@@ -422,7 +424,7 @@ export default function App({ user, onLogout }) {
           box-shadow: 0 -4px 20px rgba(15, 23, 42, 0.08);
           z-index: 50;
           display: flex !important;
-          align-items: flex-start;
+          align-items: center;
           justify-content: space-around;
           padding: 12px 0 calc(10px + var(--app-safe-area-bottom));
           overflow-x: hidden;
@@ -446,8 +448,8 @@ export default function App({ user, onLogout }) {
         .bottom-nav-bar button span {
           display: block;
           line-height: 1.1;
-          white-space: normal;
-          font-size: 15px !important;
+          white-space: nowrap;
+          font-size: 12px !important;
           font-weight: 600;
         }
         .bottom-nav-bar button i {
@@ -552,6 +554,9 @@ export default function App({ user, onLogout }) {
           </div>
           <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontSize:"clamp(18px, 5vw, 20px)", fontWeight:800, color:C.dark, letterSpacing:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>MOVORA</span>
         </div>
+        <button type="button" onClick={() => setTab("check-in")} title="Open QR check-in scanner" aria-label="Open QR check-in scanner" style={{ position:"absolute", right:16, top:"50%", transform:"translateY(-10%)", display:"grid", placeItems:"center", width:34, height:34, padding:0, border:0, borderRadius:6, background:"transparent", color:"#000", cursor:"pointer" }}>
+          <img src="/movora-qr-logo.png" alt="" aria-hidden="true" style={{ width:30, height:30, objectFit:"contain", display:"block" }} />
+        </button>
       </div>
 
       {/* Content */}
@@ -649,6 +654,8 @@ export default function App({ user, onLogout }) {
 
           </>
         )}
+
+        {tab==="check-in" && <CheckInScreen onClose={() => setTab("dashboard")} />}
 
         {/* ── STATS (History + Progress) ── */}
         {tab==="stats" && (
@@ -1408,6 +1415,7 @@ export default function App({ user, onLogout }) {
 
       {showLog      && <LogModal onClose={() => setShowLog(false)} onSave={entry => {
         saveLogs([...logs, entry]);
+        setCelebrating(true);
         sync(api.createWorkout({
           category: entry.category,
           exercise: entry.exercise,
@@ -1430,6 +1438,7 @@ export default function App({ user, onLogout }) {
       }} goal={goal} initial={calProfile}/>}
       {showFoodPicker && <FoodPickerModal meal={activeMeal} onAdd={item => addFood(activeMeal, item)} onClose={() => setShowFoodPicker(false)} />}
       {showSettingsModal && <SettingsPagesModal onClose={() => setShowSettingsModal(false)} />}
+      {celebrating && <ConfettiCanvas onComplete={() => setCelebrating(false)} />}
       </div>
     </ErrorBoundary>
   );
