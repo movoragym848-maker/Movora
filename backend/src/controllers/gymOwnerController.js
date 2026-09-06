@@ -539,6 +539,81 @@ export async function renewGymMember(req, res, next) {
   }
 }
 
+export async function getGymStaff(req, res, next) {
+  try {
+    if (req.user.role !== "gym_owner") {
+      return res.status(403).json({ message: "Access forbidden. Gym owner role required." });
+    }
+
+    const { rows } = await query(
+      `SELECT id, name, email, phone, role, created_at
+       FROM gym_staff
+       WHERE gym_owner_id = $1
+       ORDER BY created_at DESC, name ASC`,
+      [req.user.sub]
+    );
+    res.json(rows);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function addGymStaff(req, res, next) {
+  try {
+    if (req.user.role !== "gym_owner") {
+      return res.status(403).json({ message: "Access forbidden. Gym owner role required." });
+    }
+
+    const { name, email, phone, role } = req.body;
+    const cleanName = name?.trim();
+    const cleanEmail = email?.trim().toLowerCase();
+    const cleanPhone = phone?.replace(/\D/g, "");
+    const cleanRole = role?.trim();
+
+    if (!cleanName || !cleanEmail || !cleanPhone || !cleanRole) {
+      return res.status(400).json({ message: "Name, email, phone number, and role are required." });
+    }
+    if (cleanName.length < 2 || cleanName.length > 100) {
+      return res.status(400).json({ message: "Name must be between 2 and 100 characters." });
+    }
+    if (cleanPhone.length !== 10 || !/^[6-9]\d{9}$/.test(cleanPhone)) {
+      return res.status(400).json({ message: "Invalid Indian phone number. Must be exactly 10 digits starting with 6-9." });
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+      return res.status(400).json({ message: "Please enter a valid email address." });
+    }
+
+    const { rows } = await query(
+      `INSERT INTO gym_staff (gym_owner_id, name, email, phone, role)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING id, name, email, phone, role, created_at`,
+      [req.user.sub, cleanName, cleanEmail, cleanPhone, cleanRole]
+    );
+    res.status(201).json(rows[0]);
+  } catch (err) {
+    if (err.code === "23505") {
+      return res.status(409).json({ message: "A staff member with this email or phone already exists." });
+    }
+    next(err);
+  }
+}
+
+export async function deleteGymStaff(req, res, next) {
+  try {
+    if (req.user.role !== "gym_owner") {
+      return res.status(403).json({ message: "Access forbidden. Gym owner role required." });
+    }
+    const { rowCount } = await query(
+      "DELETE FROM gym_staff WHERE id = $1 AND gym_owner_id = $2",
+      [req.params.staffId, req.user.sub]
+    );
+    if (rowCount === 0) return res.status(404).json({ message: "Staff member not found." });
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+}
+
 export async function addGymMember(req, res, next) {
   try {
     if (req.user.role !== "gym_owner") {

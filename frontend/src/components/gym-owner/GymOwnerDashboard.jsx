@@ -1,10 +1,32 @@
 import { useState, useEffect } from "react";
-import { getGymMembers, sendMemberReminder, renewGymMember, addGymMember } from "../../services/api";
+import { getGymMembers, getGymAttendance, sendMemberReminder, renewGymMember, addGymMember, updateGymMember, cancelGymMember } from "../../services/api";
 import { MEMBERSHIP_PLANS } from "../../constants/membership";
 import SettingsPagesModal from "../common/SettingsPagesModal";
+import StaffPanel from "./StaffPanel";
 
 
 const MEMBERSHIP_FEE = 1000; // Rs per month
+
+const getLocalDateValue = date => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const isValidDateValue = value => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [year, month, day] = value.split("-").map(Number);
+  const date = new Date(year, month - 1, day);
+  return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day;
+};
+
+const formatDateInput = value => {
+  const digits = value.replace(/\D/g, "").slice(0, 8);
+  if (digits.length <= 4) return digits;
+  if (digits.length <= 6) return `${digits.slice(0, 4)}-${digits.slice(4)}`;
+  return `${digits.slice(0, 4)}-${digits.slice(4, 6)}-${digits.slice(6)}`;
+};
 
 const C = {
   bg: "#F3F4F6",
@@ -190,9 +212,33 @@ const generateDemoEarnings = (shouldGenerate) => {
   return earnings;
 };
 
+const formatExpiryFullDate = dateStr => {
+  if (!dateStr) return "";
+  const date = new Date(dateStr);
+  const day = date.getDate();
+  const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+  const month = monthNames[date.getMonth()];
+  
+  // Get ordinal suffix
+  let suffix = "th";
+  if (day === 1 || day === 21 || day === 31) suffix = "st";
+  else if (day === 2 || day === 22) suffix = "nd";
+  else if (day === 3 || day === 23) suffix = "rd";
+  
+  return `${day}${suffix} ${month}`;
+};
+
+const MemberActionIcon = ({ type }) => {
+  const commonProps = { width: 20, height: 20, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true };
+  if (type === "whatsapp") return <svg {...commonProps}><path d="M20 11.5a8 8 0 0 1-11.8 7L4 20l1.5-4.1A8 8 0 1 1 20 11.5Z" /><path d="M8.5 8.5c.3 2 2 4.2 4.2 5.2.8.4 1.5.4 2-.1l.7-.7" /></svg>;
+  if (type === "call") return <svg {...commonProps}><path d="M6.6 3.5 9 3l2 4-1.8 1.5a12 12 0 0 0 6.3 6.3L17 13l4 2-.5 2.4a2 2 0 0 1-2.2 1.6A16 16 0 0 1 5 5.7a2 2 0 0 1 1.6-2.2Z" /></svg>;
+  if (type === "edit") return <svg {...commonProps}><path d="m14 5 5 5" /><path d="M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17l-1 3Z" /></svg>;
+  return <svg {...commonProps} fill="currentColor" stroke="none"><circle cx="12" cy="5" r="1.5" /><circle cx="12" cy="12" r="1.5" /><circle cx="12" cy="19" r="1.5" /></svg>;
+};
+
 export default function GymOwnerDashboard({ gymOwner, onLogout }) {
   const isDemoGymOwner = gymOwner?.email === DEMO_GYM_OWNER_EMAIL;
-  const [activeTab, setActiveTab] = useState("admin"); // "admin", "members", or "profile"
+  const [activeTab, setActiveTab] = useState("admin"); // "admin", "members", "attendance", "staff", or "profile"
   const [members, setMembers] = useState(() => {
     // Initialize with demo data if it's a demo account
     if (isDemoGymOwner) return generateDemoMembers(true);
@@ -221,8 +267,10 @@ export default function GymOwnerDashboard({ gymOwner, onLogout }) {
   const [addingMembershipMember, setAddingMembershipMember] = useState(null);
   const [selectedAddPlan, setSelectedAddPlan] = useState("monthly");
   const [toastNotification, setToastNotification] = useState(null);
+  const [activeDropdownMemberId, setActiveDropdownMemberId] = useState(null);
 
   const [showAddMemberModal, setShowAddMemberModal] = useState(false);
+  const [editingMember, setEditingMember] = useState(null);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [newMemberForm, setNewMemberForm] = useState({
     firstName: "",
@@ -235,6 +283,10 @@ export default function GymOwnerDashboard({ gymOwner, onLogout }) {
 
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [selectedDetailMember, setSelectedDetailMember] = useState(null);
+  const [attendanceDate, setAttendanceDate] = useState(() => getLocalDateValue(new Date()));
+  const [attendance, setAttendance] = useState([]);
+  const [attendanceLoading, setAttendanceLoading] = useState(false);
+  const [attendanceError, setAttendanceError] = useState("");
 
 
   const fetchMembersList = async () => {
@@ -278,7 +330,41 @@ export default function GymOwnerDashboard({ gymOwner, onLogout }) {
       localStorage.setItem(`gym_earnings_${gymOwner?.gym_id}`, JSON.stringify(demoEarnings));
       setEarnings(demoEarnings);
     }
+
+    // Close options dropdown on click outside
+    const handleDocumentClick = () => {
+      setActiveDropdownMemberId(null);
+    };
+    document.addEventListener("click", handleDocumentClick);
+    return () => {
+      document.removeEventListener("click", handleDocumentClick);
+    };
   }, []);
+
+  useEffect(() => {
+    if (activeTab !== "attendance") return;
+    if (!isValidDateValue(attendanceDate)) return;
+
+    let cancelled = false;
+    setAttendanceLoading(true);
+    setAttendanceError("");
+    getGymAttendance(attendanceDate)
+      .then(data => {
+        if (!cancelled) setAttendance(Array.isArray(data) ? data : []);
+      })
+      .catch(err => {
+        if (!cancelled) {
+          setAttendance([]);
+          // Older deployments may not have the attendance route yet; show the empty state gracefully.
+          setAttendanceError(err.status === 404 ? "" : (err.message || "Unable to load attendance."));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setAttendanceLoading(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [activeTab, attendanceDate]);
 
 
   // Filter members by query
@@ -517,6 +603,49 @@ export default function GymOwnerDashboard({ gymOwner, onLogout }) {
     }
   };
 
+  const handleCancelMembership = async (member) => {
+    if (!window.confirm(`Are you sure you want to cancel the membership for ${member.name}?`)) {
+      return;
+    }
+
+    try {
+      const res = await cancelGymMember({ userId: member.user_id });
+      if (res.ok) {
+        // Update local member state
+        const updatedMembers = members.map(m => {
+          if (m.user_id === member.user_id) {
+            return {
+              ...m,
+              membership_type: "expired",
+              status: "expired",
+              days_remaining: 0,
+              expiry_date: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().split('T')[0] // yesterday
+            };
+          }
+          return m;
+        });
+        setMembers(updatedMembers);
+
+        setToastNotification({
+          type: 'success',
+          title: '✅ Membership Cancelled',
+          message: `Membership for ${member.name} has been cancelled successfully.`
+        });
+        setTimeout(() => setToastNotification(null), 4000);
+      }
+    } catch (err) {
+      console.error("Failed to cancel membership", err);
+      setToastNotification({
+        type: 'error',
+        title: '❌ Cancellation Failed',
+        message: err.message || "Unable to cancel membership."
+      });
+      setTimeout(() => setToastNotification(null), 4000);
+    } finally {
+      setActiveDropdownMemberId(null);
+    }
+  };
+
   // Send reminder to member
   // Validate Indian phone number
   const isValidPhoneNumber = (phone) => {
@@ -646,6 +775,49 @@ export default function GymOwnerDashboard({ gymOwner, onLogout }) {
       } else {
         setAddingMemberError(err.message || "Failed to add member. Email or Phone might already exist.");
       }
+    } finally {
+      setSubmittingNewMember(false);
+    }
+  };
+
+  const handleSubmitEditMember = async (e) => {
+    e.preventDefault();
+    setAddingMemberError("");
+    const { firstName, lastName, email, phone } = newMemberForm;
+    const cleanPhone = phone.replace(/\D/g, '');
+    if (!firstName.trim() || !lastName.trim() || !email.trim() || !phone.trim()) {
+      setAddingMemberError("All fields are required.");
+      return;
+    }
+    if (!/^[6-9]\d{9}$/.test(cleanPhone)) {
+      setAddingMemberError("Invalid Indian phone number. Must be 10 digits starting with 6-9.");
+      return;
+    }
+    if (!/\S+@\S+\.\S+/.test(email)) {
+      setAddingMemberError("Invalid email address format.");
+      return;
+    }
+    setSubmittingNewMember(true);
+    try {
+      const updatedMember = isDemoGymOwner
+        ? { user_id: editingMember.user_id, name: `${firstName.trim()} ${lastName.trim()}`, email: email.trim(), phone: cleanPhone }
+        : await updateGymMember({
+          userId: editingMember.user_id,
+          firstName: firstName.trim(),
+          lastName: lastName.trim(),
+          email: email.trim(),
+          phone: cleanPhone
+        });
+      setMembers(currentMembers => currentMembers.map(member =>
+        member.user_id === editingMember.user_id ? { ...member, ...updatedMember } : member
+      ));
+      setShowAddMemberModal(false);
+      setEditingMember(null);
+      setNewMemberForm({ firstName: "", lastName: "", email: "", phone: "" });
+      setToastNotification({ type: "success", title: "Member Updated", message: `${firstName} ${lastName}'s profile was updated.` });
+      setTimeout(() => setToastNotification(null), 3000);
+    } catch (err) {
+      setAddingMemberError(err.message || "Failed to update member profile.");
     } finally {
       setSubmittingNewMember(false);
     }
@@ -831,7 +1003,22 @@ export default function GymOwnerDashboard({ gymOwner, onLogout }) {
             font-size: 12px !important;
             padding: 8px 10px !important;
             min-height: 40px;
-            min-width: 100%;
+            min-width: 0;
+          }
+
+          .member-search-bar-row button {
+            min-width: 0 !important;
+            width: auto !important;
+          }
+
+          .member-card-action-btn {
+            min-width: 42px !important;
+            width: 42px !important;
+            height: 42px !important;
+          }
+
+          .member-search-bar-row {
+            min-width: 0;
           }
           
           .gym-bottom-nav button {
@@ -973,6 +1160,161 @@ export default function GymOwnerDashboard({ gymOwner, onLogout }) {
             font-size: 8px !important;
           }
         }
+
+        /* ─────── MEMBERS CARD STYLE ─────── */
+        .member-card {
+          background: #FFFFFF;
+          border: 1px solid #E5E7EB;
+          border-radius: 16px;
+          padding: 16px;
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+          box-shadow: 0 1px 3px rgba(0,0,0,0.02);
+          transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        .member-card:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+        }
+        .member-card-action-btn {
+          width: 42px;
+          height: 42px;
+          min-width: 42px !important;
+          min-height: 42px;
+          background: #F3F4F6;
+          border: 1px solid #E5E7EB;
+          cursor: pointer;
+          padding: 8px;
+          border-radius: 8px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          transition: all 0.2s;
+          color: #1F2937 !important;
+        }
+        .member-card-action-btn i {
+          display: block;
+          font-size: 20px !important;
+          line-height: 1;
+        }
+        .member-card-action-btn.btn-whatsapp {
+          color: #15803D !important;
+          background: #DCFCE7;
+          border-color: #BBF7D0;
+        }
+        .member-card-action-btn.btn-call {
+          color: #0369A1 !important;
+          background: #E0F2FE;
+          border-color: #BAE6FD;
+        }
+        .member-card-action-btn.btn-edit {
+          color: #7C3AED !important;
+          background: #EDE9FE;
+          border-color: #DDD6FE;
+        }
+        .member-card-action-btn.btn-options {
+          color: #374151 !important;
+          background: #F3F4F6;
+        }
+        .member-card-action-btn:hover {
+          background-color: #F3F4F6;
+          transform: scale(1.1);
+        }
+        .member-card-action-btn.btn-renew:hover {
+          color: #3B82F6;
+          background-color: rgba(59,130,246,0.1);
+        }
+        .member-card-action-btn.btn-call:hover {
+          color: #10B981;
+          background-color: rgba(16,185,129,0.1);
+        }
+        .member-card-action-btn.btn-whatsapp:hover {
+          color: #25D366;
+          background-color: rgba(37,211,102,0.1);
+        }
+        .member-card-action-btn.btn-edit:hover {
+          color: #1F2937;
+          background-color: rgba(31,41,55,0.1);
+        }
+        .member-card-action-btn.btn-options:hover {
+          color: #1F2937;
+          background-color: rgba(31,41,55,0.1);
+        }
+        
+        .member-search-bar-row {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          margin-bottom: 18px;
+          width: 100%;
+        }
+        .member-search-input-wrapper {
+          position: relative;
+          flex: 1;
+        }
+        .member-search-input-wrapper i {
+          position: absolute;
+          left: 12px;
+          top: 50%;
+          transform: translateY(-50%);
+          color: #9CA3AF;
+          font-size: 16px;
+        }
+        .member-search-input-field {
+          width: 100%;
+          padding: 10px 12px 10px 36px;
+          border-radius: 12px;
+          border: 1.5px solid #E5E7EB;
+          background: #FFFFFF;
+          color: #1F2937;
+          outline: none;
+          font-size: 14px;
+          font-family: 'Barlow', sans-serif;
+          transition: all 0.2s;
+        }
+        .member-search-input-field:focus {
+          border-color: #3B82F6;
+          box-shadow: 0 0 0 3px rgba(59,130,246,0.1);
+        }
+        .member-filter-btn {
+          background: #FFFFFF;
+          border: 1.5px solid #E5E7EB;
+          color: #4B5563;
+          width: 42px;
+          height: 42px;
+          border-radius: 12px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          cursor: pointer;
+          transition: all 0.2s;
+          font-size: 18px;
+        }
+        .member-filter-btn:hover {
+          background: #F3F4F6;
+          border-color: #D1D5DB;
+          color: #1F2937;
+        }
+        .member-add-btn {
+          background: #3B82F6;
+          border: none;
+          color: #FFFFFF;
+          width: 42px;
+          height: 42px;
+          border-radius: 12px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          cursor: pointer;
+          transition: all 0.2s;
+          font-size: 18px;
+        }
+        .member-add-btn:hover {
+          background: #2563EB;
+          transform: translateY(-1px);
+          box-shadow: 0 4px 6px -1px rgba(59,130,246,0.2), 0 2px 4px -1px rgba(59,130,246,0.06);
+        }
       `}</style>
       
       {/* Header */}
@@ -999,263 +1341,447 @@ export default function GymOwnerDashboard({ gymOwner, onLogout }) {
         {activeTab === "members" && (
           <>
             <div style={{ marginBottom:20 }}>
-              <h1 style={{ color:C.dark, margin:"0 0 4px", fontFamily:"'Barlow Condensed',sans-serif", fontSize:"clamp(22px, 6vw, 26px)", fontWeight:800 }}>
+              <h1 style={{ color:C.dark, margin:"0 0 4px", display:"flex", alignItems:"center", justifyContent:"flex-start", gap:12, fontFamily:"'Barlow Condensed',sans-serif", fontSize:"clamp(22px, 6vw, 26px)", fontWeight:800 }}>
                 Gym Members
+                <span style={{ flexShrink:0, padding:"5px 10px", borderRadius:8, background:"#FEF3C7", border:"1px solid #FDE68A", color:"#92400E", fontFamily:"'Barlow',sans-serif", fontSize:13, fontWeight:700, lineHeight:1 }}>
+                  {totalMembers} members
+                </span>
               </h1>
               <p style={{ color:C.muted, margin:0, fontSize:14 }}>
                 Search and view details of all members registered under <strong>{gymOwner.gymName}</strong>.
               </p>
             </div>
 
-            <div className="gym-members-card">
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, width: "100%" }}>
-                <span style={{ color: C.dark, fontWeight: 700, fontSize: 15 }}>Members List ({filteredMembers.length})</span>
-                <button 
-                  onClick={() => setShowAddMemberModal(true)}
-                  style={{
-                    padding: "8px 14px",
-                    background: C.primary,
-                    color: "white",
-                    border: "none",
-                    borderRadius: 8,
-                    fontSize: 12,
-                    fontWeight: 700,
-                    cursor: "pointer",
-                    transition: "all 0.2s",
-                    minWidth: "auto",
-                    width: "auto",
-                    height: "auto",
-                    minHeight: "auto",
-                    whiteSpace: "nowrap"
-                  }}
-                  onMouseEnter={e => e.target.style.opacity = 0.9}
-                  onMouseLeave={e => e.target.style.opacity = 1}
-                >
-                  Add Member
-                </button>
-              </div>
-              
-              <div className="gym-search-container" style={{ marginBottom: 16 }}>
+            {/* Search row */}
+            <div className="member-search-bar-row">
+              <div className="member-search-input-wrapper">
+                <i className="ti ti-search" />
                 <input 
                   type="text" 
-                  placeholder="Search name or plan..."
+                  placeholder="Search by name..."
                   value={searchQuery}
                   onChange={e => setSearchQuery(e.target.value)}
-                  className="gym-search-input"
-                  style={{ width: "100%", maxWidth: "100%" }}
+                  className="member-search-input-field"
                 />
               </div>
+              <button 
+                className="member-add-btn" 
+                type="button"
+                onClick={() => document.querySelector(".member-search-input-field")?.focus()}
+                title="Focus search"
+              >
+                Search
+              </button>
+            </div>
 
+            {loading ? (
+              <div style={{ padding:"40px 0", textAlign:"center", color:C.muted, fontWeight:600 }}>Loading members...</div>
+            ) : error ? (
+              <div style={{ color:C.red, padding:"12px", background:"#FEE2E2", borderRadius:8, fontWeight:600 }}>{error}</div>
+            ) : filteredMembers.length === 0 ? (
+              <div style={{ padding:"40px 0", textAlign:"center", color:C.muted, fontWeight:600 }}>
+                {searchQuery ? "No matching members found." : "No members registered yet."}
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+                {filteredMembers.map((member, idx) => {
+                  const daysLeft = parseInt(member.days_remaining || 0);
+                  const hasNoMembership = member.membership_type === "no_membership";
+                  const isExpired = member.membership_type === "expired";
+                  const isActive = member.membership_type === "active";
+                  
+                  // Format expiry date
+                  let expiryPillText = "";
+                  if (hasNoMembership) {
+                    expiryPillText = "No Active Plan";
+                  } else if (isExpired) {
+                    expiryPillText = `Expired on ${formatExpiryFullDate(member.expiry_date)}`;
+                  } else {
+                    expiryPillText = `Expires on ${formatExpiryFullDate(member.expiry_date)}`;
+                  }
+                  
+                  return (
+                    <div key={idx} className="member-card">
+                      <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
+                        {/* Left avatar column */}
+                        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "6px", width: "70px", flexShrink: 0 }}>
+                          <div style={{ width: "55px", height: "55px", borderRadius: "50%", background: "#E5E7EB", border: `1px solid ${C.border}`, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
+                            {/* Hand-crafted clean SVG avatar */}
+                            <svg viewBox="0 0 100 100" style={{ width: "100%", height: "100%" }}>
+                              <rect width="100%" height="100%" fill="#E0F2FE" />
+                              <path d="M 40,70 L 60,70 L 56,58 L 44,58 Z" fill="#FDBA74" />
+                              <circle cx="50" cy="42" r="18" fill="#FDBA74" />
+                              {/* Hair */}
+                              <path d="M 32,38 C 32,18 68,18 68,38 C 70,38 66,28 50,28 C 34,28 30,38 32,38 Z" fill="#78350F" />
+                              {/* Shirt */}
+                              <path d="M 22,82 C 22,66 36,64 50,64 C 64,64 78,66 78,82 Z" fill="#2563EB" />
+                            </svg>
+                          </div>
+                          {/* Centered Status Badge */}
+                          <span style={{ 
+                            fontSize: "10px", 
+                            fontWeight: 700, 
+                            padding: "3px 8px", 
+                            borderRadius: "6px", 
+                            textTransform: "uppercase",
+                            letterSpacing: "0.5px",
+                            backgroundColor: hasNoMembership ? "#FEF3C7" : isExpired ? "#FEE2E2" : "#DCFCE7",
+                            color: hasNoMembership ? "#B45309" : isExpired ? "#B91C1C" : "#15803D"
+                          }}>
+                            {hasNoMembership ? "pending" : isExpired ? "expired" : "active"}
+                          </span>
+                        </div>
 
-              {loading ? (
-                <div style={{ padding:"40px 0", textAlign:"center", color:C.muted, fontWeight:600 }}>Loading members...</div>
-              ) : error ? (
-                <div style={{ color:C.red, padding:"12px", background:"#FEE2E2", borderRadius:8, fontWeight:600 }}>{error}</div>
-              ) : filteredMembers.length === 0 ? (
-                <div style={{ padding:"40px 0", textAlign:"center", color:C.muted, fontWeight:600 }}>
-                  {searchQuery ? "No matching members found." : "No members registered yet."}
-                </div>
-              ) : (
-                <div style={{ overflowX: "auto", marginLeft: "-18px", marginRight: "-18px", paddingLeft: "18px", paddingRight: "18px" }}>
-                  <table className="member-table">
-                    <thead>
-                      <tr>
-                        <th>Name</th>
-                        <th>Plan</th>
-                        <th>Days Left</th>
-                        <th>Status</th>
-                        <th>Action</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredMembers.map((member, idx) => {
-                        const daysLeft = parseInt(member.days_remaining || 0);
-                        const hasNoMembership = member.membership_type === "no_membership";
-                        const isExpired = member.membership_type === "expired";
-                        const isActive = member.membership_type === "active";
-                        
-                        return (
-                          <tr key={idx} style={{ background: hasNoMembership ? "#FFFBEB" : isExpired ? "#FEF2F2" : "transparent" }}>
-                            <td 
-                              className="clickable-name-cell"
-                              style={{ 
-                                fontWeight: 700, 
-                                cursor: "pointer"
+                        {/* Right Info Column */}
+                        <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: "2px", minWidth: 0 }}>
+                          <h3 
+                            style={{ 
+                              fontSize: "16px", 
+                              fontWeight: 700, 
+                              color: C.dark, 
+                              margin: 0,
+                              cursor: "pointer",
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap"
+                            }}
+                            onClick={() => {
+                              setSelectedDetailMember(member);
+                              setShowDetailModal(true);
+                            }}
+                            onMouseEnter={e => e.target.style.color = C.primary}
+                            onMouseLeave={e => e.target.style.color = C.dark}
+                          >
+                            {member.name}
+                          </h3>
+                          
+                          <span style={{ fontSize: "12px", color: C.muted, fontWeight: 500 }}>
+                            {member.phone ? (member.phone.startsWith("+91") ? member.phone : `+91 ${member.phone}`) : "-"}
+                          </span>
+                          
+                          <span style={{ fontSize: "13px", color: "#374151", fontWeight: 600 }}>
+                            Plan: {member.plan === "-" ? "No Plan" : member.plan}
+                          </span>
+                          
+                          {/* Pills container */}
+                          <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginTop: "4px" }}>
+                            {/* Expiry Pill */}
+                            <span style={{ 
+                              fontSize: "11px", 
+                              fontWeight: 600, 
+                              padding: "4px 10px", 
+                              borderRadius: "9999px", 
+                              backgroundColor: "#F3F4F6", 
+                              border: "1px solid #E5E7EB",
+                              color: "#4B5563"
+                            }}>
+                              {expiryPillText}
+                            </span>
+                            
+                            {/* Dues Status Pill */}
+                            <span style={{ 
+                              fontSize: "11px", 
+                              fontWeight: 600, 
+                              padding: "4px 10px", 
+                              borderRadius: "9999px", 
+                              backgroundColor: isActive ? "#D1FAE5" : "#FEF3C7", 
+                              border: isActive ? "1px solid #A7F3D0" : "1px solid #FDE68A",
+                              color: isActive ? "#065F46" : "#92400E"
+                            }}>
+                              {isActive ? "Dues Paid" : "Dues Pending"}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Divider */}
+                      <div style={{ borderTop: "1px solid #F3F4F6", margin: "4px 0 0 0" }} />
+
+                      {/* Bottom Action Row */}
+                      <div style={{ display: "flex", justifyContent: "space-around", alignItems: "center", position: "relative", paddingTop: "4px" }}>
+                        {/* 1. WhatsApp */}
+                        <button 
+                          className="member-card-action-btn btn-whatsapp"
+                          onClick={() => {
+                            if (member.phone) {
+                              window.open(`https://wa.me/91${member.phone.replace(/\D/g, '')}`, "_blank");
+                            } else {
+                              alert("No phone number registered for this member.");
+                            }
+                          }}
+                          title="Message on WhatsApp"
+                        >
+                          <MemberActionIcon type="whatsapp" />
+                        </button>
+
+                        {/* 2. Call */}
+                        <button 
+                          className="member-card-action-btn btn-call"
+                          onClick={() => {
+                            if (member.phone) {
+                              window.location.href = `tel:${member.phone}`;
+                            } else {
+                              alert("No phone number registered for this member.");
+                            }
+                          }}
+                          title="Call Member"
+                        >
+                          <MemberActionIcon type="call" />
+                        </button>
+
+                        {/* 3. Edit */}
+                        <button
+                          className="member-card-action-btn btn-edit"
+                          onClick={() => {
+                            const [firstName = "", ...lastNameParts] = (member.name || "").split(" ");
+                            setEditingMember(member);
+                            setNewMemberForm({ firstName, lastName: lastNameParts.join(" "), email: member.email || "", phone: member.phone || "" });
+                            setAddingMemberError("");
+                            setShowAddMemberModal(true);
+                          }}
+                          title="Edit Member Profile"
+                        >
+                          <MemberActionIcon type="edit" />
+                        </button>
+
+                        {/* 4. Options Menu (Three Dots) */}
+                        <div style={{ position: "relative" }}>
+                          <button 
+                            className="member-card-action-btn btn-options"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setActiveDropdownMemberId(activeDropdownMemberId === member.user_id ? null : member.user_id);
+                            }}
+                            title="Options"
+                          >
+                            <MemberActionIcon type="options" />
+                          </button>
+
+                          {/* Dropdown Options overlay */}
+                          {activeDropdownMemberId === member.user_id && (
+                            <div 
+                              style={{
+                                position: "absolute",
+                                bottom: "36px", // Position menu above the row
+                                right: "0",
+                                background: "#FFFFFF",
+                                border: "1px solid #E5E7EB",
+                                borderRadius: "8px",
+                                boxShadow: "0 4px 12px rgba(0,0,0,0.1), 0 2px 4px rgba(0,0,0,0.05)",
+                                width: "160px",
+                                zIndex: 110,
+                                display: "flex",
+                                flexDirection: "column",
+                                padding: "4px 0",
+                                overflow: "hidden"
                               }}
-                              onClick={() => {
-                                setSelectedDetailMember(member);
-                                setShowDetailModal(true);
-                              }}
+                              onClick={(e) => e.stopPropagation()}
                             >
-                              {member.name}
-                              {hasNoMembership && (
-                                <div style={{ 
-                                  display: 'block',
-                                  marginTop: 4,
-                                  padding: "2px 6px", 
-                                  background: "#FDEBC7", 
-                                  color: "#92400E",
-                                  borderRadius: 4,
-                                  fontSize: 10,
-                                  fontWeight: 700,
-                                  textTransform: "uppercase",
-                                  letterSpacing: 0.5
-                                }}>
-                                  NO MEMBERSHIP
-                                </div>
-                              )}
-                            </td>
-                            <td style={{ color: hasNoMembership ? "#F59E0B" : "inherit", fontWeight: hasNoMembership ? 700 : 500 }}>
-                              {member.plan === "-" ? "No Plan" : member.plan}
-                            </td>
-                            <td>
-                              {hasNoMembership ? (
-                                <span style={{ color: "#F59E0B", fontWeight: 700 }}>Pending</span>
-                              ) : isExpired ? (
-                                <span style={{ color: C.red, fontWeight: 700 }}>Expired</span>
-                              ) : isActive && daysLeft <= 5 ? (
-                                <span style={{ 
-                                  color: C.warning, 
-                                  fontWeight: 700 
-                                }}>
-                                  {daysLeft} days
-                                </span>
-                              ) : (
-                                <span style={{ 
-                                  color: C.success, 
-                                  fontWeight: 700 
-                                }}>
-                                  {daysLeft} days
-                                </span>
-                              )}
-                            </td>
-                            <td>
-                              <span className={`badge ${hasNoMembership ? "inactive" : isExpired ? "expired" : member.status}`}>
-                                {hasNoMembership ? "pending" : isExpired ? "expired" : member.status}
-                              </span>
-                            </td>
-                            <td>
-                              {isExpired ? (
+                              <button
+                                onClick={() => {
+                                  setSelectedDetailMember(member);
+                                  setShowDetailModal(true);
+                                  setActiveDropdownMemberId(null);
+                                }}
+                                style={{
+                                  padding: "8px 12px",
+                                  border: "none",
+                                  background: "none",
+                                  textAlign: "left",
+                                  width: "100%",
+                                  cursor: "pointer",
+                                  fontSize: "13px",
+                                  fontWeight: "600",
+                                  color: "#1F2937"
+                                }}
+                                onMouseEnter={(e) => e.target.style.backgroundColor = "#F3F4F6"}
+                                onMouseLeave={(e) => e.target.style.backgroundColor = "transparent"}
+                              >
+                                📋 View Details
+                              </button>
+
+                              {isExpired && (
                                 <button
                                   onClick={() => {
                                     setRenewingMember(member);
                                     setSelectedPlan("monthly");
                                     setShowRenewModal(true);
+                                    setActiveDropdownMemberId(null);
                                   }}
                                   style={{
-                                    padding: "5px 10px",
-                                    background: C.success,
-                                    color: "white",
+                                    padding: "8px 12px",
                                     border: "none",
-                                    borderRadius: 6,
-                                    fontSize: 12,
-                                    fontWeight: 700,
+                                    background: "none",
+                                    textAlign: "left",
+                                    width: "100%",
                                     cursor: "pointer",
-                                    whiteSpace: "nowrap",
-                                    transition: "all 0.2s",
-                                    minWidth: "auto",
-                                    width: "auto"
+                                    fontSize: "13px",
+                                    fontWeight: "600",
+                                    color: C.primary
                                   }}
+                                  onMouseEnter={(e) => e.target.style.backgroundColor = "#F3F4F6"}
+                                  onMouseLeave={(e) => e.target.style.backgroundColor = "transparent"}
                                 >
-                                  🔄 Renew
+                                  🔄 Renew Plan
                                 </button>
-                              ) : hasNoMembership ? (
-                                <div style={{ display: "flex", gap: 6, flexDirection: 'row', alignItems: 'center' }}>
-                                  <button
-                                    onClick={() => handleSendReminder(member, "members_table")}
-                                    disabled={sendingReminderId === member.user_id}
-                                    title="Send reminder"
-                                    style={{
-                                      width: 34,
-                                      height: 30,
-                                      padding: '0 6px',
-                                      background: sendingReminderId === member.user_id ? C.muted : C.warning,
-                                      color: "white",
-                                      border: "none",
-                                      borderRadius: 6,
-                                      fontSize: 14,
-                                      fontWeight: 700,
-                                      cursor: sendingReminderId === member.user_id ? "not-allowed" : "pointer",
-                                      display: "inline-flex",
-                                      alignItems: "center",
-                                      justifyContent: "center",
-                                      transition: "all 0.15s",
-                                      opacity: sendingReminderId === member.user_id ? 0.6 : 1,
-                                      minWidth: "auto",
-                                      width: "auto",
-                                    }}
-                                  >
-                                    {sendingReminderId === member.user_id ? "..." : "📢"}
-                                  </button>
-                                  <button
-                                    onClick={() => {
-                                      setAddingMembershipMember(member);
-                                      setSelectedAddPlan("monthly");
-                                      setShowAddMembershipModal(true);
-                                    }}
-                                    title="Add plan"
-                                    style={{
-                                      width: 34,
-                                      height: 30,
-                                      padding: '0 6px',
-                                      background: C.success,
-                                      color: "white",
-                                      border: "none",
-                                      borderRadius: 6,
-                                      fontSize: 14,
-                                      fontWeight: 700,
-                                      cursor: "pointer",
-                                      display: "inline-flex",
-                                      alignItems: "center",
-                                      justifyContent: "center",
-                                      transition: "all 0.15s",
-                                      minWidth: "auto",
-                                      width: "auto",
-                                    }}
-                                  >
-                                    ➕
-                                  </button>
-                                </div>
-                              ) : (
-                                <span style={{ color: C.muted, fontSize: 12 }}>-</span>
                               )}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              )}
 
-              {/* ⚠️ ERROR ALERT FOR MEMBERS TABLE REMIND BUTTON */}
-              {reminderError && reminderError.section === "members_table" && (
-                <div style={{
-                  marginTop:12,
-                  background: reminderError.type === "invalid_phone" ? "#FEF3C7" : "#FEE2E2",
-                  border: reminderError.type === "invalid_phone" ? "2px solid #F59E0B" : "2px solid #EF4444",
-                  borderRadius:12,
-                  padding:"14px 16px",
-                  display:"flex",
-                  alignItems:"center",
-                  gap:12
-                }}>
-                  <div style={{ fontSize:24 }}>
-                    {reminderError.type === "invalid_phone" ? "📱" : "❌"}
-                  </div>
-                  <div style={{ flex:1 }}>
-                    <p style={{
-                      margin:0,
-                      color: reminderError.type === "invalid_phone" ? "#92400E" : "#991B1B",
-                      fontSize:13,
-                      fontWeight:600
-                    }}>
-                      {reminderError.message}
-                    </p>
-                  </div>
+                              {hasNoMembership && (
+                                <button
+                                  onClick={() => {
+                                    setAddingMembershipMember(member);
+                                    setSelectedAddPlan("monthly");
+                                    setShowAddMembershipModal(true);
+                                    setActiveDropdownMemberId(null);
+                                  }}
+                                  style={{
+                                    padding: "8px 12px",
+                                    border: "none",
+                                    background: "none",
+                                    textAlign: "left",
+                                    width: "100%",
+                                    cursor: "pointer",
+                                    fontSize: "13px",
+                                    fontWeight: "600",
+                                    color: C.success
+                                  }}
+                                  onMouseEnter={(e) => e.target.style.backgroundColor = "#F3F4F6"}
+                                  onMouseLeave={(e) => e.target.style.backgroundColor = "transparent"}
+                                >
+                                  ➕ Add Plan
+                                </button>
+                              )}
+
+                              {(isExpired || isActive) && (
+                                <button
+                                  onClick={() => {
+                                    handleCancelMembership(member);
+                                  }}
+                                  style={{
+                                    padding: "8px 12px",
+                                    border: "none",
+                                    background: "none",
+                                    textAlign: "left",
+                                    width: "100%",
+                                    cursor: "pointer",
+                                    fontSize: "13px",
+                                    fontWeight: "600",
+                                    color: C.red
+                                  }}
+                                  onMouseEnter={(e) => e.target.style.backgroundColor = "#F3F4F6"}
+                                  onMouseLeave={(e) => e.target.style.backgroundColor = "transparent"}
+                                >
+                                  ❌ Cancel Plan
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* ⚠️ ERROR ALERT FOR MEMBERS TABLE REMIND BUTTON */}
+            {reminderError && reminderError.section === "members_table" && (
+              <div style={{
+                marginTop:12,
+                background: reminderError.type === "invalid_phone" ? "#FEF3C7" : "#FEE2E2",
+                border: reminderError.type === "invalid_phone" ? "2px solid #F59E0B" : "2px solid #EF4444",
+                borderRadius:12,
+                padding:"14px 16px",
+                display:"flex",
+                alignItems:"center",
+                gap:12
+              }}>
+                <div style={{ fontSize:24 }}>
+                  {reminderError.type === "invalid_phone" ? "📱" : "❌"}
                 </div>
-              )}
+                <div style={{ flex:1 }}>
+                  <p style={{
+                    margin:0,
+                    color: reminderError.type === "invalid_phone" ? "#92400E" : "#991B1B",
+                    fontSize:13,
+                    fontWeight:600
+                  }}>
+                    {reminderError.message}
+                  </p>
+                </div>
+              </div>
+            )}
+          </>
+        )}
+
+        {/* ── ATTENDANCE TAB ── */}
+        {activeTab === "attendance" && (
+          <>
+            <div style={{ marginBottom:20 }}>
+              <h1 style={{ color:C.dark, margin:"0 0 4px", fontFamily:"'Barlow Condensed',sans-serif", fontSize:"clamp(22px, 6vw, 26px)", fontWeight:800 }}>
+                Attendance
+                <span style={{ marginLeft:10, padding:"5px 10px", borderRadius:8, background:"#DBEAFE", border:"1px solid #BFDBFE", color:"#1D4ED8", fontFamily:"'Barlow',sans-serif", fontSize:13, fontWeight:700, lineHeight:1 }}>
+                  {attendance.length} attended
+                </span>
+              </h1>
+              <p style={{ color:C.muted, margin:0, fontSize:14 }}>
+                Members who checked in at <strong>{gymOwner.gymName}</strong>.
+              </p>
             </div>
+
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:12, marginBottom:18, padding:"12px 14px", background:C.card, border:`1px solid ${C.border}`, borderRadius:12 }}>
+              <label htmlFor="attendance-date" style={{ color:C.dark, fontSize:13, fontWeight:700 }}>Choose date</label>
+              <input
+                id="attendance-date"
+                type="text"
+                inputMode="numeric"
+                placeholder="YYYY-MM-DD"
+                pattern="\d{4}-\d{2}-\d{2}"
+                value={attendanceDate}
+                onChange={event => setAttendanceDate(formatDateInput(event.target.value))}
+                style={{ border:`1px solid ${C.border}`, borderRadius:8, padding:"9px 10px", color:C.dark, fontFamily:"'Barlow',sans-serif", fontSize:14, fontWeight:600, background:C.surface }}
+              />
+            </div>
+
+            {attendanceDate && !isValidDateValue(attendanceDate) && (
+              <div style={{ margin:"-8px 0 16px", color:C.warning, fontSize:12, fontWeight:600 }}>
+                Enter a valid date in YYYY-MM-DD format.
+              </div>
+            )}
+
+            {attendanceLoading ? (
+              <div style={{ padding:"40px 0", textAlign:"center", color:C.muted, fontWeight:600 }}>Loading attendance...</div>
+            ) : attendanceError ? (
+              <div style={{ color:C.red, padding:12, background:"#FEE2E2", borderRadius:8, fontWeight:600 }}>{attendanceError}</div>
+            ) : attendance.length === 0 ? (
+              <div style={{ padding:"40px 0", textAlign:"center", color:C.muted, fontWeight:600 }}>No members attended on this date.</div>
+            ) : (
+              <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
+                {attendance.map(member => {
+                  const checkInTime = new Date(member.check_in_at).toLocaleTimeString([], { hour:"numeric", minute:"2-digit" });
+                  const initials = (member.name || "Member").split(" ").map(part => part[0]).join("").slice(0, 2).toUpperCase();
+                  return (
+                    <div key={member.id} className="member-card">
+                      <div style={{ display:"flex", alignItems:"center", gap:16 }}>
+                        <div style={{ width:55, height:55, borderRadius:"50%", background:"#E0F2FE", border:`1px solid ${C.border}`, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0, color:"#0369A1", fontSize:18, fontWeight:800 }}>
+                          {initials}
+                        </div>
+                        <div style={{ flex:1, minWidth:0 }}>
+                          <h3 style={{ fontSize:16, fontWeight:700, color:C.dark, margin:0, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{member.name}</h3>
+                          <span style={{ display:"block", fontSize:12, color:C.muted, fontWeight:500, marginTop:2 }}>
+                            {member.phone ? (member.phone.startsWith("+91") ? member.phone : `+91 ${member.phone}`) : "-"}
+                          </span>
+                          <div style={{ display:"flex", flexWrap:"wrap", gap:6, marginTop:6 }}>
+                            <span style={{ fontSize:11, fontWeight:600, padding:"4px 10px", borderRadius:"9999px", background:"#DCFCE7", border:"1px solid #BBF7D0", color:"#15803D" }}>Checked in {checkInTime}</span>
+                            <span style={{ fontSize:11, fontWeight:600, padding:"4px 10px", borderRadius:"9999px", background:"#F3F4F6", border:"1px solid #E5E7EB", color:"#4B5563" }}>Plan: {member.plan}</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </>
         )}
 
@@ -1611,6 +2137,8 @@ export default function GymOwnerDashboard({ gymOwner, onLogout }) {
             )}
           </>
         )}
+
+        {activeTab === "staff" && <StaffPanel />}
 
         {/* ── PROFILE TAB ── */}
         {activeTab === "profile" && (
@@ -2133,11 +2661,12 @@ export default function GymOwnerDashboard({ gymOwner, onLogout }) {
           }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
               <h2 style={{ color: C.dark, margin: 0, fontFamily: "'Barlow Condensed', sans-serif", fontSize: 20, fontWeight: 700 }}>
-                ➕ Add New Member
+                {editingMember ? "✏️ Edit Member Profile" : "➕ Add New Member"}
               </h2>
               <button
                 onClick={() => {
                   setShowAddMemberModal(false);
+                  setEditingMember(null);
                   setAddingMemberError("");
                   setNewMemberForm({ firstName: "", lastName: "", email: "", phone: "" });
                 }}
@@ -2153,7 +2682,7 @@ export default function GymOwnerDashboard({ gymOwner, onLogout }) {
               </button>
             </div>
 
-            <form onSubmit={handleSubmitAddMember} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            <form onSubmit={editingMember ? handleSubmitEditMember : handleSubmitAddMember} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
               {addingMemberError && (
                 <div style={{
                   padding: "10px 12px",
@@ -2284,12 +2813,13 @@ export default function GymOwnerDashboard({ gymOwner, onLogout }) {
                     fontFamily: "'Barlow', sans-serif"
                   }}
                 >
-                  {submittingNewMember ? "Adding..." : "Add Member"}
+                  {submittingNewMember ? (editingMember ? "Saving..." : "Adding...") : (editingMember ? "Save Changes" : "Add Member")}
                 </button>
                 <button
                   type="button"
                   onClick={() => {
                     setShowAddMemberModal(false);
+                    setEditingMember(null);
                     setAddingMemberError("");
                     setNewMemberForm({ firstName: "", lastName: "", email: "", phone: "" });
                   }}
@@ -2528,6 +3058,8 @@ export default function GymOwnerDashboard({ gymOwner, onLogout }) {
         {[
           { id:"admin", icon:"dashboard", label:"Admin" },
           { id:"members", icon:"users", label:"Members" },
+          { id:"attendance", icon:"calendar", label:"Attendance" },
+          { id:"staff", icon:"user-plus", label:"Staff" },
           { id:"profile", icon:"user", label:"Profile" }
         ].map(({ id, icon, label }) => (
           <button 

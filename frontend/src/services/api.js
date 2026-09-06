@@ -126,8 +126,13 @@ export const login = payload => request("/auth/login", { method:"POST", body:JSO
 export const signupGymOwner = payload => request("/gym-owners/signup", { method:"POST", body:JSON.stringify(payload) });
 export const loginGymOwner = payload => request("/gym-owners/login", { method:"POST", body:JSON.stringify(payload) });
 export const getGymMembers = () => request("/gym-owners/members");
+export const getGymAttendance = date => request(`/gym-owners/attendance?date=${encodeURIComponent(date)}`);
+export const getGymStaff = () => request("/gym-owners/staff");
+export const addGymStaff = payload => request("/gym-owners/staff", { method:"POST", body:JSON.stringify(payload) });
+export const deleteGymStaff = staffId => request(`/gym-owners/staff/${encodeURIComponent(staffId)}`, { method:"DELETE" });
 export const sendMemberReminder = payload => request("/gym-owners/send-reminder", { method:"POST", body:JSON.stringify(payload) });
 export const addGymMember = payload => request("/gym-owners/add-member", { method:"POST", body:JSON.stringify(payload) });
+export const updateGymMember = payload => request("/gym-owners/update-member", { method:"PUT", body:JSON.stringify(payload) });
 
 export const logout = refreshToken => {
   const isGymOwner = !!localStorage.getItem("rs_gym_owner_session");
@@ -144,5 +149,7 @@ export const updateGoal = payload => request("/goal", { method:"PUT", body:JSON.
 export const checkGym = name => request(`/auth/check-gym?name=${encodeURIComponent(name)}`);
 export const getRegisteredGyms = () => request("/auth/gyms");
 export const renewGymMember = payload => request("/gym-owners/renew-membership", { method:"POST", body:JSON.stringify(payload) });
+export const cancelGymMember = payload => request("/gym-owners/cancel-membership", { method:"POST", body:JSON.stringify(payload) });
 export const sendPhoneOTP = phone => request("/auth/send-otp", { method:"POST", body:JSON.stringify({ phone }) });
 export const verifyPhoneOTP = (phone, otp) => request("/auth/verify-otp", { method:"POST", body:JSON.stringify({ phone, otp }) });
+export const checkIn = payload => request("/v1/attendance/check-in", { method:"POST", body:JSON.stringify(payload) });
