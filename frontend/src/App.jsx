@@ -6,7 +6,6 @@ import LogModal from "./components/workouts/LogModal";
 import ProgressChart from "./components/workouts/ProgressChart";
 import CalSetupModal from "./components/diet/CalSetupModal";
 import FoodPickerModal from "./components/diet/FoodPickerModal";
-import UserAdminDashboard from "./components/admin/UserAdminDashboard";
 import ErrorBoundary from "./components/error/ErrorBoundary";
 import SettingsPagesModal from "./components/common/SettingsPagesModal";
 import * as api from "./services/api";
@@ -107,8 +106,7 @@ export default function App({ user, onLogout }) {
   const [selectedCalDate, setSelectedCalDate] = useState(() => today);
 
   // UI state for tabs
-  const [statsSubTab, setStatsSubTab] = useState("history");
-  const [bodySubTab, setBodySubTab] = useState("weight");
+  const [statsView, setStatsView] = useState("weight");
 
   useLayoutEffect(() => {
     const updateWidth = () => {
@@ -124,7 +122,7 @@ export default function App({ user, onLogout }) {
     if (calChartRef.current) observer.observe(calChartRef.current);
     if (wChartRef.current) observer.observe(wChartRef.current);
     return () => observer.disconnect();
-  }, [tab, bodySubTab]);
+  }, [tab, statsView]);
   const [calAllLogs, setCalAllLogs] = useState(() => {
     const stored = LS(`rs_cal_${email}`);
     if (stored && Object.keys(stored).length > 0) return stored;
@@ -322,10 +320,8 @@ export default function App({ user, onLogout }) {
 
   const navItems = [
     { id:"dashboard", icon:"ti-home",      label:"Home" },
-    { id:"stats",     icon:"ti-chart-bar", label:"Stats" },
     { id:"workouts",  icon:"ti-video",     label:"Workout" },
-    { id:"admin",     icon:"ti-dashboard", label:"Admin" },
-    { id:"body",      icon:"ti-heart-rate-monitor", label:"Body" },
+    { id:"stats",     icon:"ti-chart-bar", label:"Stats" },
     { id:"profile",   icon:"ti-user",      label:"Profile" },
   ];
 
@@ -661,22 +657,22 @@ export default function App({ user, onLogout }) {
         {/* ── STATS (History + Progress) ── */}
         {tab==="stats" && (
           <>
-            {/* Sub-tab switcher */}
-            <div style={{ display:"flex", background:C.surface, borderRadius:12, padding:4, marginBottom:20, gap:4 }}>
-              {[{id:"history",label:"History",icon:"📋"},{id:"progress",label:"Progress",icon:"📈"}].map(st => (
-                <button key={st.id} onClick={() => setStatsSubTab(st.id)} style={{
+            {/* Stats switcher */}
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(4, 1fr)", background:C.surface, borderRadius:12, padding:4, marginBottom:20, gap:4 }}>
+              {[{id:"weight",label:"Weight",icon:"⚖️"},{id:"calories",label:"Calories",icon:"🔥"},{id:"history",label:"History",icon:"📋"},{id:"progress",label:"Progress",icon:"📈"}].map(st => (
+                <button key={st.id} onClick={() => setStatsView(st.id)} style={{
                   flex:1, padding:"9px", borderRadius:9, border:"none", cursor:"pointer",
-                  background:statsSubTab===st.id ? C.card : "transparent",
-                  color:statsSubTab===st.id ? C.primary : C.muted,
-                  fontWeight:statsSubTab===st.id ? 700 : 500,
-                  fontSize:13, fontFamily:"'Barlow',sans-serif",
-                  boxShadow:statsSubTab===st.id ? "0 2px 8px rgba(59,130,246,0.1)" : "none",
+                  background:statsView===st.id ? C.card : "transparent",
+                  color:statsView===st.id ? C.primary : C.muted,
+                  fontWeight:statsView===st.id ? 700 : 500,
+                  fontSize:12, fontFamily:"'Barlow',sans-serif",
+                  boxShadow:statsView===st.id ? "0 2px 8px rgba(59,130,246,0.1)" : "none",
                   transition:"all 0.2s",
                 }}>{st.icon} {st.label}</button>
               ))}
             </div>
 
-            {statsSubTab==="history" && (
+            {statsView==="history" && (
               <>
                 <div style={{ display:"flex", gap:7, marginBottom:18, flexWrap:"wrap" }}>
                   {["All",...Object.keys(EXERCISES)].map(c => (
@@ -722,7 +718,7 @@ export default function App({ user, onLogout }) {
             </>
             )}
 
-            {statsSubTab==="progress" && (
+            {statsView==="progress" && (
               <>
                 {uniqueExs.length===0 ? (
                   <div style={{ textAlign:"center", padding:"60px 20px", color:C.muted }}>
@@ -771,7 +767,7 @@ export default function App({ user, onLogout }) {
         )}
 
         {/* ── BODY (Weight + Calories) ── */}
-        {tab==="body" && (() => {
+        {tab==="stats" && (statsView==="weight" || statsView==="calories") && (() => {
           // Robustly parse weight logs: deterministic fallbacks for invalid dates,
           // filter out invalid/non-positive weights, then sort chronologically.
           const mapped = wLogs.map((l, idx, arr) => {
@@ -799,22 +795,7 @@ export default function App({ user, onLogout }) {
 
           return (
             <>
-              {/* Sub-tab switcher */}
-              <div style={{ display:"flex", background:C.surface, borderRadius:12, padding:4, marginBottom:20, gap:4 }}>
-                {[{id:"weight",label:"Weight",icon:"⚖️"},{id:"calories",label:"Calories",icon:"🔥"}].map(st => (
-                  <button key={st.id} onClick={() => setBodySubTab(st.id)} style={{
-                    flex:1, padding:"9px", borderRadius:9, border:"none", cursor:"pointer",
-                    background:bodySubTab===st.id ? C.card : "transparent",
-                    color:bodySubTab===st.id ? C.primary : C.muted,
-                    fontWeight:bodySubTab===st.id ? 700 : 500,
-                    fontSize:13, fontFamily:"'Barlow',sans-serif",
-                    boxShadow:bodySubTab===st.id ? "0 2px 8px rgba(59,130,246,0.1)" : "none",
-                    transition:"all 0.2s",
-                  }}>{st.icon} {st.label}</button>
-                ))}
-              </div>
-
-              {bodySubTab==="weight" && (
+              {statsView==="weight" && (
               <>
               <SectionTitle>Body Weight</SectionTitle>
               {/* Log input */}
@@ -940,7 +921,7 @@ export default function App({ user, onLogout }) {
             </>
             )}
 
-            {bodySubTab==="calories" && (
+            {statsView==="calories" && (
             <>
             <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:16 }}>
               <SectionTitle>Calories</SectionTitle>
@@ -1386,17 +1367,6 @@ export default function App({ user, onLogout }) {
           </>
         )}
 
-        {tab==="admin" && (
-          <UserAdminDashboard
-            user={user}
-            logs={logs}
-            weekLogs={weekLogs}
-            uniqueExs={uniqueExs}
-            totalVol={totalVol}
-            totalCal={totalCal}
-            calGoal={calGoal}
-          />
-        )}
       </div>
 
       {/* Bottom Nav */}
