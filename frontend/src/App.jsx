@@ -620,7 +620,11 @@ export default function App({ user, onLogout }) {
               </div>
             )}
 
-            <PrimaryBtn onClick={() => setShowLog(true)} style={{ marginBottom:20, padding:"13px" }}>+ Log Exercise</PrimaryBtn>
+            <PrimaryBtn onClick={() => setShowLog(true)} style={{ marginBottom:10, padding:"13px" }}>+ Log Exercise</PrimaryBtn>
+            <button type="button" onClick={() => setTab("check-in")} title="Open QR check-in scanner" style={{ width:"100%", marginBottom:20, padding:"13px", display:"flex", alignItems:"center", justifyContent:"center", gap:8, border:`1px solid ${C.dark}`, borderRadius:10, background:C.card, color:C.dark, fontFamily:"'Barlow',sans-serif", fontSize:14, fontWeight:700, cursor:"pointer" }}>
+              <img src="/movora-qr-logo.png" alt="" aria-hidden="true" style={{ width:22, height:22, objectFit:"contain" }} />
+              Mark Attendance
+            </button>
 
             {todayLogs.length>0 && (
               <>
