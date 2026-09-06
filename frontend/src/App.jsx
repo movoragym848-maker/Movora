@@ -1330,6 +1330,14 @@ export default function App({ user, onLogout }) {
                 <div style={{ flex:1, minWidth:180 }}>
                   <div style={{ color:C.dark, fontWeight:800, fontSize:27, fontFamily:"'Barlow Condensed',sans-serif" }}>{profile.displayName}</div>
                   <div style={{ color:C.muted, fontSize:13, marginTop:3 }}>{profile.bio || "Add a short bio about your fitness journey."}</div>
+                  <div style={{ display:"flex", gap:18, marginTop:14, flexWrap:"wrap" }}>
+                    {[['Posts', logs.length], ['Followers', profile.followers || 0], ['Following', profile.following || 0]].map(([label, value]) => (
+                      <div key={label} style={{ minWidth:64 }}>
+                        <div style={{ color:C.dark, fontSize:18, fontWeight:800, fontFamily:"'Barlow Condensed',sans-serif" }}>{value}</div>
+                        <div style={{ color:C.muted, fontSize:11 }}>{label}</div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
             </div>
