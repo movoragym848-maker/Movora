@@ -554,9 +554,6 @@ export default function App({ user, onLogout }) {
           </div>
           <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontSize:"clamp(18px, 5vw, 20px)", fontWeight:800, color:C.dark, letterSpacing:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>MOVORA</span>
         </div>
-        <button type="button" onClick={() => setTab("check-in")} title="Open QR check-in scanner" aria-label="Open QR check-in scanner" style={{ position:"absolute", right:16, top:"50%", transform:"translateY(-10%)", display:"grid", placeItems:"center", width:34, height:34, padding:0, border:0, borderRadius:6, background:"transparent", color:"#000", cursor:"pointer" }}>
-          <img src="/movora-qr-logo.png" alt="" aria-hidden="true" style={{ width:30, height:30, objectFit:"contain", display:"block" }} />
-        </button>
       </div>
 
       {/* Content */}
