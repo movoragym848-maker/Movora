@@ -1725,7 +1725,7 @@ export default function GymOwnerDashboard({ gymOwner, onLogout }) {
                 </span>
               </h1>
               <p style={{ color:C.muted, margin:0, fontSize:14 }}>
-                Members who checked in at <strong>{gymOwner.gymName}</strong>.
+                Staff and members who checked in at <strong>{gymOwner.gymName}</strong>.
               </p>
             </div>
 
@@ -1758,12 +1758,13 @@ export default function GymOwnerDashboard({ gymOwner, onLogout }) {
             ) : (
               <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
                 {attendance.map(member => {
+                  const isStaff = member.is_staff === true;
                   const checkInTime = new Date(member.check_in_at).toLocaleTimeString([], { hour:"numeric", minute:"2-digit" });
                   const initials = (member.name || "Member").split(" ").map(part => part[0]).join("").slice(0, 2).toUpperCase();
                   return (
-                    <div key={member.id} className="member-card">
+                    <div key={member.id} className="member-card" style={isStaff ? { border:"2px solid #86EFAC", background:"linear-gradient(135deg, #F0FDF4, #FFFFFF)", boxShadow:"0 8px 20px rgba(22, 163, 74, 0.12)" } : undefined}>
                       <div style={{ display:"flex", alignItems:"center", gap:16 }}>
-                        <div style={{ width:55, height:55, borderRadius:"50%", background:"#E0F2FE", border:`1px solid ${C.border}`, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0, color:"#0369A1", fontSize:18, fontWeight:800 }}>
+                        <div style={{ width:55, height:55, borderRadius:"50%", background:isStaff ? "#DCFCE7" : "#E0F2FE", border:`1px solid ${isStaff ? "#86EFAC" : C.border}`, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0, color:isStaff ? "#15803D" : "#0369A1", fontSize:18, fontWeight:800 }}>
                           {initials}
                         </div>
                         <div style={{ flex:1, minWidth:0 }}>
@@ -1773,7 +1774,11 @@ export default function GymOwnerDashboard({ gymOwner, onLogout }) {
                           </span>
                           <div style={{ display:"flex", flexWrap:"wrap", gap:6, marginTop:6 }}>
                             <span style={{ fontSize:11, fontWeight:600, padding:"4px 10px", borderRadius:"9999px", background:"#DCFCE7", border:"1px solid #BBF7D0", color:"#15803D" }}>Checked in {checkInTime}</span>
-                            <span style={{ fontSize:11, fontWeight:600, padding:"4px 10px", borderRadius:"9999px", background:"#F3F4F6", border:"1px solid #E5E7EB", color:"#4B5563" }}>Plan: {member.plan}</span>
+                            {isStaff ? (
+                              <span style={{ fontSize:11, fontWeight:700, padding:"4px 10px", borderRadius:"9999px", background:"#BBF7D0", border:"1px solid #86EFAC", color:"#166534" }}>STAFF{member.staff_role ? ` · ${member.staff_role}` : ""}</span>
+                            ) : (
+                              <span style={{ fontSize:11, fontWeight:600, padding:"4px 10px", borderRadius:"9999px", background:"#F3F4F6", border:"1px solid #E5E7EB", color:"#4B5563" }}>Plan: {member.plan}</span>
+                            )}
                           </div>
                         </div>
                       </div>

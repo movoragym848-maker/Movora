@@ -214,10 +214,15 @@ export async function getGymAttendance(req, res, next) {
         u.id as user_id,
         u.name,
         u.phone,
+        s.id IS NOT NULL as is_staff,
+        s.role as staff_role,
         COALESCE(m.plan_label, 'No Plan') as plan
        FROM attendance a
        JOIN registered_gyms g ON g.gym_id = a.gym_id AND g.gym_owner_id = $1
        JOIN users u ON u.id = a.user_id
+       LEFT JOIN gym_staff s
+         ON s.gym_owner_id = g.gym_owner_id
+        AND (LOWER(s.email::text) = LOWER(u.email) OR s.phone = u.phone)
        LEFT JOIN LATERAL (
          SELECT plan_label
          FROM memberships
@@ -226,7 +231,7 @@ export async function getGymAttendance(req, res, next) {
          LIMIT 1
        ) m ON true
        WHERE (a.timestamp AT TIME ZONE 'UTC')::date = $2::date
-       ORDER BY a.timestamp DESC`,
+      ORDER BY CASE WHEN s.id IS NOT NULL THEN 0 ELSE 1 END, a.timestamp DESC`,
       [req.user.sub, requestedDate]
     );
 

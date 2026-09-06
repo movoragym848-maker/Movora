@@ -26,7 +26,7 @@ export async function checkIn(req, res, next) {
     if (!userId) return res.status(401).json({ message: "Invalid authenticated user" });
 
     const { rows: gymRows } = await query(
-      `SELECT gym_id, name, latitude, longitude, geofence_radius_meters
+      `SELECT gym_id, gym_owner_id, name, latitude, longitude, geofence_radius_meters
        FROM registered_gyms
        WHERE gym_id = $1`,
       [input.gym_id]
@@ -37,6 +37,17 @@ export async function checkIn(req, res, next) {
     if (gym.latitude === null || gym.longitude === null) {
       return res.status(400).json({ message: "This gym has not configured its location yet" });
     }
+
+    const { rows: staffRows } = await query(
+      `SELECT s.id
+       FROM gym_staff s
+       JOIN users u ON u.id = $1
+        AND (LOWER(s.email::text) = LOWER(u.email) OR s.phone = u.phone)
+       WHERE s.gym_owner_id = $2
+       LIMIT 1`,
+      [userId, gym.gym_owner_id]
+    );
+    const isStaff = staffRows.length > 0;
 
     const { rows: memberships } = await query(
       `SELECT 1
@@ -49,7 +60,7 @@ export async function checkIn(req, res, next) {
        LIMIT 1`,
       [userId, gym.name]
     );
-    if (memberships.length === 0) {
+    if (!isStaff && memberships.length === 0) {
       return res.status(403).json({ message: "An active membership is required to check in" });
     }
 
