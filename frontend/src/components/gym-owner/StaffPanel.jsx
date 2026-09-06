@@ -129,7 +129,11 @@ export default function StaffPanel() {
             <div style={{ marginTop: 3, color: C.primary, fontSize: 12, fontWeight: 700 }}>{member.role}</div>
             <div style={{ marginTop: 5, color: C.muted, fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{member.email}</div>
           </div>
-          <a href={`https://wa.me/91${String(member.phone).replace(/\D/g, "")}`} target="_blank" rel="noreferrer" aria-label={`Message ${member.name} on WhatsApp`} title={`Message ${member.name} on WhatsApp`} style={{ flexShrink: 0, width: 38, height: 38, display: "grid", placeItems: "center", borderRadius: "50%", background: "#DCFCE7", color: "#15803D", textDecoration: "none", fontSize: 13, fontWeight: 800 }}>WA</a>
+          <a href={`https://wa.me/91${String(member.phone).replace(/\D/g, "")}`} target="_blank" rel="noreferrer" aria-label={`Message ${member.name} on WhatsApp`} title={`Message ${member.name} on WhatsApp`} style={{ flexShrink: 0, width: 38, height: 38, display: "grid", placeItems: "center", borderRadius: "50%", background: "#DCFCE7", color: "#15803D", textDecoration: "none" }}>
+            <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="currentColor">
+              <path d="M12 2a9.8 9.8 0 0 0-8.5 14.7L2 22l5.5-1.4A9.8 9.8 0 1 0 12 2Zm0 17.8a8 8 0 0 1-4.1-1.1l-.3-.2-3.3.8.9-3.2-.2-.3A8 8 0 1 1 12 19.8Zm4.4-5.9c-.2-.1-1.2-.6-1.4-.7-.2-.1-.3-.1-.5.1s-.5.7-.7.9c-.1.2-.3.2-.5.1a6.5 6.5 0 0 1-1.9-1.2 7.2 7.2 0 0 1-1.3-1.6c-.1-.2 0-.3.1-.4l.4-.5.2-.4c.1-.2 0-.3 0-.5l-.6-1.5c-.2-.4-.3-.4-.5-.4h-.4c-.2 0-.4.1-.6.3-.2.2-.8.8-.8 2s.8 2.3.9 2.5c.1.2 1.6 2.5 3.9 3.5.5.2.9.3 1.2.4.5.2 1 .1 1.4.1.4-.1 1.2-.5 1.3-1 .2-.5.2-.9.1-1 0-.2-.2-.2-.4-.3Z" />
+            </svg>
+          </a>
           <a href={`tel:${member.phone}`} aria-label={`Call ${member.name}`} title={`Call ${member.name}`} style={{ flexShrink: 0, width: 38, height: 38, display: "grid", placeItems: "center", borderRadius: "50%", background: "#DCFCE7", color: "#15803D", textDecoration: "none", fontSize: 18 }}>☎</a>
           <button type="button" onClick={() => handleDelete(member)} aria-label={`Delete ${member.name}`} title="Delete staff member" style={{ flexShrink: 0, width: 38, height: 38, border: 0, borderRadius: "50%", background: "#FEF2F2", color: C.red, cursor: "pointer", fontSize: 17 }}>⌫</button>
         </article>)}
