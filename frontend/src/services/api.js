@@ -153,3 +153,12 @@ export const cancelGymMember = payload => request("/gym-owners/cancel-membership
 export const sendPhoneOTP = phone => request("/auth/send-otp", { method:"POST", body:JSON.stringify({ phone }) });
 export const verifyPhoneOTP = (phone, otp) => request("/auth/verify-otp", { method:"POST", body:JSON.stringify({ phone, otp }) });
 export const checkIn = payload => request("/v1/attendance/check-in", { method:"POST", body:JSON.stringify(payload) });
+export const getSocialProfile = () => request("/social/profile");
+export const saveSocialProfile = payload => request("/social/profile", { method:"PUT", body:JSON.stringify(payload) });
+export const searchSocialProfiles = query => request(`/social/search?q=${encodeURIComponent(query)}`);
+export const toggleSocialFollow = userId => request(`/social/users/${encodeURIComponent(userId)}/follow`, { method:"POST" });
+export const getSocialReels = cursor => request(`/social/reels?limit=8${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`);
+export const createSocialReel = payload => request("/social/reels", { method:"POST", body:JSON.stringify(payload) });
+export const getSocialConversations = () => request("/social/conversations");
+export const getSocialMessages = conversationId => request(`/social/conversations/${encodeURIComponent(conversationId)}/messages`);
+export const sendSocialMessage = (userId, body) => request(`/social/users/${encodeURIComponent(userId)}/messages`, { method:"POST", body:JSON.stringify({ body }) });

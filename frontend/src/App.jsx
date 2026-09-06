@@ -10,6 +10,7 @@ import ErrorBoundary from "./components/error/ErrorBoundary";
 import SettingsPagesModal from "./components/common/SettingsPagesModal";
 import * as api from "./services/api";
 import CheckInScreen from "./components/check-in/CheckInScreen";
+import SocialHub from "./components/social/SocialHub";
 
 export default function App({ user, onLogout }) {
   if (!user || !user.email) {
@@ -335,6 +336,8 @@ export default function App({ user, onLogout }) {
 
   const navItems = [
     { id:"dashboard", icon:"ti-home",      label:"Home" },
+    { id:"reels",     icon:"ti-video",     label:"Reels" },
+    { id:"messages",  icon:"ti-comment",   label:"Messages" },
     { id:"workouts",  icon:"ti-video",     label:"Workout" },
     { id:"stats",     icon:"ti-chart-bar", label:"Stats" },
     { id:"profile",   icon:"ti-user",      label:"Profile" },
@@ -668,6 +671,9 @@ export default function App({ user, onLogout }) {
         )}
 
         {tab==="check-in" && <CheckInScreen onClose={() => setTab("dashboard")} />}
+
+        {tab==="reels" && <SocialHub mode="reels" user={user} />}
+        {tab==="messages" && <SocialHub mode="messages" user={user} />}
 
         {/* ── STATS (History + Progress) ── */}
         {tab==="stats" && (

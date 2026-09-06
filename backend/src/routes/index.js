@@ -9,6 +9,7 @@ import { nutritionRoutes } from "./nutritionRoutes.js";
 import { workoutRoutes } from "./workoutRoutes.js";
 import { aiRoutes } from "./aiRoutes.js";
 import { attendanceRoutes } from "./attendanceRoutes.js";
+import { socialRoutes } from "./socialRoutes.js";
 
 export const routes = Router();
 
@@ -23,3 +24,4 @@ routes.use("/nutrition", requireAuth, nutritionRoutes);
 routes.use("/goal", requireAuth, goalRoutes);
 routes.use("/ai", requireAuth, aiRoutes);
 routes.use("/v1/attendance", attendanceRoutes);
+routes.use("/social", socialRoutes);
