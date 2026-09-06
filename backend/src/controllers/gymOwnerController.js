@@ -569,11 +569,34 @@ export async function addGymStaff(req, res, next) {
       return res.status(403).json({ message: "Access forbidden. Gym owner role required." });
     }
 
-    const { name, email, phone, role } = req.body;
+    const { memberId, name, email, phone, role } = req.body;
     const cleanName = name?.trim();
     const cleanEmail = email?.trim().toLowerCase();
     const cleanPhone = phone?.replace(/\D/g, "");
     const cleanRole = role?.trim();
+
+    if (memberId) {
+      const { rows: ownerRows } = await query("SELECT gym_name FROM gym_owners WHERE id = $1", [req.user.sub]);
+      if (ownerRows.length === 0) return res.status(404).json({ message: "Gym owner not found." });
+
+      const { rows: memberRows } = await query(
+        `SELECT id, name, email, phone
+         FROM users
+         WHERE id = $1 AND gym_name = $2 AND user_type = 'gym_member'`,
+        [memberId, ownerRows[0].gym_name]
+      );
+      if (memberRows.length === 0) return res.status(404).json({ message: "Selected member was not found in your gym." });
+
+      const member = memberRows[0];
+      if (!cleanRole) return res.status(400).json({ message: "A staff role is required." });
+      const { rows } = await query(
+        `INSERT INTO gym_staff (gym_owner_id, name, email, phone, role)
+         VALUES ($1, $2, $3, $4, $5)
+         RETURNING id, name, email, phone, role, created_at`,
+        [req.user.sub, member.name, member.email, member.phone, cleanRole]
+      );
+      return res.status(201).json(rows[0]);
+    }
 
     if (!cleanName || !cleanEmail || !cleanPhone || !cleanRole) {
       return res.status(400).json({ message: "Name, email, phone number, and role are required." });

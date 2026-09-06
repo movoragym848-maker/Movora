@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { addGymStaff, deleteGymStaff, getGymStaff } from "../../services/api";
+import { addGymStaff, deleteGymStaff, getGymMembers, getGymStaff } from "../../services/api";
 
 const C = {
   card: "#FFFFFF",
@@ -12,6 +12,7 @@ const C = {
 };
 
 const emptyForm = { name: "", email: "", phone: "", role: "Trainer" };
+const emptyAssignment = { memberId: "", role: "Trainer" };
 
 function initials(name) {
   return name.split(" ").map(part => part[0]).join("").slice(0, 2).toUpperCase();
@@ -22,6 +23,9 @@ export default function StaffPanel() {
   const [form, setForm] = useState(emptyForm);
   const [search, setSearch] = useState("");
   const [showForm, setShowForm] = useState(false);
+  const [staffMode, setStaffMode] = useState("choice");
+  const [members, setMembers] = useState([]);
+  const [assignment, setAssignment] = useState(emptyAssignment);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
@@ -41,6 +45,12 @@ export default function StaffPanel() {
 
   useEffect(() => { loadStaff(); }, []);
 
+  useEffect(() => {
+    getGymMembers()
+      .then(data => setMembers(Array.isArray(data) ? data : []))
+      .catch(() => setMembers([]));
+  }, []);
+
   const updateField = event => {
     const { name, value } = event.target;
     setForm(current => ({ ...current, [name]: name === "phone" ? value.replace(/\D/g, "").slice(0, 10) : value }));
@@ -57,6 +67,22 @@ export default function StaffPanel() {
       setShowForm(false);
     } catch (err) {
       setError(err.message || "Unable to add staff member.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleAssign = async event => {
+    event.preventDefault();
+    setSubmitting(true);
+    setError("");
+    try {
+      const created = await addGymStaff(assignment);
+      setStaff(current => [created, ...current]);
+      setAssignment(emptyAssignment);
+      setShowForm(false);
+    } catch (err) {
+      setError(err.message || "Unable to assign staff member.");
     } finally {
       setSubmitting(false);
     }
@@ -84,14 +110,47 @@ export default function StaffPanel() {
           <h1 style={{ color: C.dark, margin: "0 0 4px", fontFamily: "'Barlow Condensed', sans-serif", fontSize: 28, fontWeight: 800 }}>Staff</h1>
           <p style={{ color: C.muted, margin: 0, fontSize: 14 }}>Manage the people who keep your gym moving.</p>
         </div>
-        <button type="button" onClick={() => { setShowForm(true); setError(""); }} style={{ border: 0, borderRadius: 10, background: C.primary, color: "#fff", padding: "11px 15px", fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}>
+        <button type="button" onClick={() => { setShowForm(true); setStaffMode("choice"); setError(""); }} style={{ border: 0, borderRadius: 10, background: C.primary, color: "#fff", padding: "11px 15px", fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}>
           + Add Staff
         </button>
       </div>
 
       {error && <div role="alert" style={{ marginBottom: 16, padding: "11px 13px", borderRadius: 10, background: "#FEF2F2", border: "1px solid #FECACA", color: "#991B1B", fontSize: 13 }}>{error}</div>}
 
-      {showForm && <form onSubmit={handleSubmit} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 14, padding: 18, marginBottom: 18 }}>
+      {showForm && staffMode === "choice" && <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 14, padding: 18, marginBottom: 18 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <h2 style={{ margin: 0, color: C.dark, fontFamily: "'Barlow Condensed', sans-serif", fontSize: 21 }}>Add Staff</h2>
+          <button type="button" onClick={() => setShowForm(false)} aria-label="Close add staff options" style={{ border: 0, background: "none", color: C.muted, fontSize: 24, cursor: "pointer", lineHeight: 1 }}>×</button>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
+          <button type="button" onClick={() => setStaffMode("assign")} style={{ border: `1px solid ${C.primary}`, borderRadius: 10, background: "#EFF6FF", color: C.primary, padding: 16, fontWeight: 700, cursor: "pointer" }}>Assign from Members</button>
+          <button type="button" onClick={() => setStaffMode("custom")} style={{ border: `1px solid ${C.border}`, borderRadius: 10, background: C.surface, color: C.dark, padding: 16, fontWeight: 700, cursor: "pointer" }}>Add Custom Staff</button>
+        </div>
+      </div>}
+
+      {showForm && staffMode === "assign" && <form onSubmit={handleAssign} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 14, padding: 18, marginBottom: 18 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <h2 style={{ margin: 0, color: C.dark, fontFamily: "'Barlow Condensed', sans-serif", fontSize: 21 }}>Assign Member as Staff</h2>
+          <button type="button" onClick={() => setShowForm(false)} aria-label="Close assign staff form" style={{ border: 0, background: "none", color: C.muted, fontSize: 24, cursor: "pointer", lineHeight: 1 }}>×</button>
+        </div>
+        <label style={{ display: "flex", flexDirection: "column", gap: 6, color: C.dark, fontSize: 12, fontWeight: 700 }}>
+          Select member
+          <select value={assignment.memberId} onChange={event => setAssignment(current => ({ ...current, memberId: event.target.value }))} required style={{ width: "100%", padding: "11px 12px", border: `1px solid ${C.border}`, borderRadius: 8, color: C.dark, background: C.surface, font: "inherit", fontWeight: 500 }}>
+            <option value="">Choose a member</option>
+            {members.map(member => <option key={member.user_id} value={member.user_id}>{member.name} · {member.phone}</option>)}
+          </select>
+        </label>
+        <label style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 12, color: C.dark, fontSize: 12, fontWeight: 700 }}>
+          Role
+          <select value={assignment.role} onChange={event => setAssignment(current => ({ ...current, role: event.target.value }))} style={{ width: "100%", padding: "11px 12px", border: `1px solid ${C.border}`, borderRadius: 8, color: C.dark, background: C.surface, font: "inherit", fontWeight: 500 }}>
+            <option>Trainer</option><option>Front Desk</option><option>Manager</option><option>Cleaner</option><option>Other</option>
+          </select>
+        </label>
+        <button type="submit" disabled={submitting || members.length === 0} style={{ marginTop: 16, width: "100%", border: 0, borderRadius: 9, background: C.dark, color: "#fff", padding: 12, fontWeight: 700, cursor: submitting ? "wait" : "pointer" }}>{submitting ? "Assigning..." : "Assign Staff Member"}</button>
+        {members.length === 0 && <p style={{ margin: "10px 0 0", color: C.muted, fontSize: 12 }}>No gym members are available to assign.</p>}
+      </form>}
+
+      {showForm && staffMode === "custom" && <form onSubmit={handleSubmit} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 14, padding: 18, marginBottom: 18 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
           <h2 style={{ margin: 0, color: C.dark, fontFamily: "'Barlow Condensed', sans-serif", fontSize: 21 }}>New Staff Member</h2>
           <button type="button" onClick={() => setShowForm(false)} aria-label="Close add staff form" style={{ border: 0, background: "none", color: C.muted, fontSize: 24, cursor: "pointer", lineHeight: 1 }}>×</button>
