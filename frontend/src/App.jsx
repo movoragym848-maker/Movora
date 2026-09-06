@@ -144,6 +144,16 @@ export default function App({ user, onLogout }) {
   const [showCalSetup, setShowCalSetup] = useState(false);
   const [showFoodPicker, setShowFoodPicker] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [profile, setProfile] = useState(() => LS(`rs_profile_${email}`) || {
+    displayName: user.name,
+    bio: "",
+    avatar: "",
+    posts: 0,
+    followers: 0,
+    following: 0,
+  });
+  const [profileDraft, setProfileDraft] = useState(profile);
+  const [showProfileEditor, setShowProfileEditor] = useState(false);
   const [activeMeal, setActiveMeal] = useState("Breakfast");
   const [manualName, setManualName] = useState("");
   const [manualCal, setManualCal] = useState("");
@@ -158,6 +168,11 @@ export default function App({ user, onLogout }) {
   const [filterCat, setFilterCat] = useState(() => "All");
   const [workoutCat, setWorkoutCat] = useState(() => "Push");
   const [workoutEx, setWorkoutEx] = useState(() => EXERCISE_VIDEOS["Push"][0] || {});
+
+  const saveProfile = nextProfile => {
+    setProfile(nextProfile);
+    saveLS(`rs_profile_${email}`, nextProfile);
+  };
 
   const toggleGoal = () => {
     const next = goal==="bulking" ? "cutting" : "bulking";
@@ -1306,15 +1321,40 @@ export default function App({ user, onLogout }) {
         {tab==="profile" && (
           <>
             <SectionTitle>Profile</SectionTitle>
-            <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:16, padding:"22px 20px", marginBottom:14, display:"flex", alignItems:"center", gap:16, flexWrap:"wrap" }}>
-              <Avatar name={user.name} size={62}/>
-              <div style={{ minWidth:0 }}>
-                <div style={{ color:C.dark, fontWeight:700, fontSize:20, fontFamily:"'Barlow Condensed',sans-serif" }}>{user.name}</div>
-                <div style={{ color:C.muted, fontSize:13 }}>{user.email}</div>
-                <div style={{ color:C.muted, fontSize:13 }}>{user.phone}</div>
-                <div style={{ color:C.muted, fontSize:12, marginTop:3 }}>Member since {new Date(user.joinedAt).toLocaleDateString("en-IN",{month:"long",year:"numeric"})}</div>
+            <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:16, padding:"22px 20px", marginBottom:14 }}>
+              <div style={{ display:"flex", alignItems:"center", gap:18, flexWrap:"wrap" }}>
+                <div style={{ position:"relative", flexShrink:0 }}>
+                  {profile.avatar ? <img src={profile.avatar} alt={`${profile.displayName}'s profile`} style={{ width:84, height:84, borderRadius:"50%", objectFit:"cover", border:`3px solid ${C.primary}` }} /> : <Avatar name={profile.displayName} size={84} />}
+                  <button type="button" onClick={() => { setProfileDraft(profile); setShowProfileEditor(true); }} aria-label="Edit profile" title="Edit profile" style={{ position:"absolute", right:-4, bottom:-2, width:30, height:30, borderRadius:"50%", border:`3px solid ${C.card}`, background:C.dark, color:"#fff", fontSize:18, lineHeight:1, cursor:"pointer" }}>+</button>
+                </div>
+                <div style={{ flex:1, minWidth:180 }}>
+                  <div style={{ color:C.dark, fontWeight:800, fontSize:27, fontFamily:"'Barlow Condensed',sans-serif" }}>{profile.displayName}</div>
+                  <div style={{ color:C.muted, fontSize:13, marginTop:3 }}>{profile.bio || "Add a short bio about your fitness journey."}</div>
+                  <div style={{ display:"flex", gap:18, marginTop:14, flexWrap:"wrap" }}>
+                    {[['Posts', profile.posts], ['Followers', profile.followers], ['Following', profile.following]].map(([label, value]) => (
+                      <div key={label} style={{ minWidth:64 }}><div style={{ color:C.dark, fontSize:18, fontWeight:800, fontFamily:"'Barlow Condensed',sans-serif" }}>{value}</div><div style={{ color:C.muted, fontSize:11 }}>{label}</div></div>
+                    ))}
+                  </div>
+                </div>
               </div>
+              <div style={{ borderTop:`1px solid ${C.border}`, marginTop:18, paddingTop:12, color:C.muted, fontSize:12 }}>{profile.displayName === user.name ? user.email : `${user.email} · ${user.phone}`} · Member since {new Date(user.joinedAt).toLocaleDateString("en-IN",{month:"long",year:"numeric"})}</div>
             </div>
+
+            {showProfileEditor && <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:14, padding:16, marginBottom:14 }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
+                <h2 style={{ margin:0, color:C.dark, fontFamily:"'Barlow Condensed',sans-serif", fontSize:20 }}>Edit Profile</h2>
+                <button type="button" onClick={() => setShowProfileEditor(false)} aria-label="Close profile editor" style={{ border:0, background:"transparent", color:C.muted, fontSize:23, cursor:"pointer" }}>×</button>
+              </div>
+              <div style={{ display:"grid", gap:10 }}>
+                <label style={{ color:C.dark, fontSize:12, fontWeight:700 }}>Profile photo<input type="file" accept="image/*" onChange={event => { const file = event.target.files?.[0]; if (!file) return; const reader = new FileReader(); reader.onload = () => setProfileDraft(current => ({ ...current, avatar: reader.result })); reader.readAsDataURL(file); }} style={{ display:"block", width:"100%", marginTop:6, color:C.muted, fontSize:12 }} /></label>
+                <label style={{ color:C.dark, fontSize:12, fontWeight:700 }}>Display name<input value={profileDraft.displayName} onChange={event => setProfileDraft(current => ({ ...current, displayName:event.target.value }))} maxLength={60} required style={{ display:"block", width:"100%", marginTop:6, padding:"10px 11px", border:`1px solid ${C.border}`, borderRadius:8, background:C.surface, color:C.dark, font:"inherit" }} /></label>
+                <label style={{ color:C.dark, fontSize:12, fontWeight:700 }}>Bio<textarea value={profileDraft.bio} onChange={event => setProfileDraft(current => ({ ...current, bio:event.target.value }))} maxLength={140} rows={3} placeholder="Tell people about your fitness journey" style={{ display:"block", width:"100%", marginTop:6, padding:"10px 11px", border:`1px solid ${C.border}`, borderRadius:8, background:C.surface, color:C.dark, font:"inherit", resize:"vertical" }} /></label>
+                <div style={{ display:"grid", gridTemplateColumns:"repeat(3, 1fr)", gap:8 }}>
+                  {[['posts','Posts'],['followers','Followers'],['following','Following']].map(([key,label]) => <label key={key} style={{ color:C.dark, fontSize:11, fontWeight:700 }}>{label}<input type="number" min="0" value={profileDraft[key]} onChange={event => setProfileDraft(current => ({ ...current, [key]:Math.max(0, Number(event.target.value) || 0) }))} style={{ display:"block", width:"100%", marginTop:5, padding:"9px 7px", border:`1px solid ${C.border}`, borderRadius:8, background:C.surface, color:C.dark, font:"inherit" }} /></label>)}
+                </div>
+                <button type="button" onClick={() => { saveProfile(profileDraft); setShowProfileEditor(false); }} style={{ border:0, borderRadius:9, background:C.primary, color:"#fff", padding:12, fontWeight:700, cursor:"pointer" }}>Save Profile</button>
+              </div>
+            </div>}
 
             <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12, padding:"13px 18px", marginBottom:10 }}>
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
