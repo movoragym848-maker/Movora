@@ -41,7 +41,10 @@ export default function StaffPanel() {
 
   useEffect(() => { loadStaff(); }, []);
 
-  const updateField = event => setForm(current => ({ ...current, [event.target.name]: event.target.value }));
+  const updateField = event => {
+    const { name, value } = event.target;
+    setForm(current => ({ ...current, [name]: name === "phone" ? value.replace(/\D/g, "").slice(0, 10) : value }));
+  };
 
   const handleSubmit = async event => {
     event.preventDefault();
@@ -97,7 +100,7 @@ export default function StaffPanel() {
           {[["name", "Full name", "text"], ["email", "Email address", "email"], ["phone", "Phone number", "tel"]].map(([name, label, type]) => (
             <label key={name} style={{ display: "flex", flexDirection: "column", gap: 6, color: C.dark, fontSize: 12, fontWeight: 700 }}>
               {label}
-              <input name={name} type={type} value={form[name]} onChange={updateField} required placeholder={label} style={{ width: "100%", padding: "11px 12px", border: `1px solid ${C.border}`, borderRadius: 8, color: C.dark, background: C.surface, font: "inherit", fontWeight: 500 }} />
+              <input name={name} type={type} value={form[name]} onChange={updateField} required placeholder={label} maxLength={name === "phone" ? 10 : undefined} inputMode={name === "phone" ? "numeric" : undefined} pattern={name === "phone" ? "[6-9][0-9]{9}" : undefined} title={name === "phone" ? "Enter a 10-digit Indian phone number starting with 6-9." : undefined} style={{ width: "100%", padding: "11px 12px", border: `1px solid ${C.border}`, borderRadius: 8, color: C.dark, background: C.surface, font: "inherit", fontWeight: 500 }} />
             </label>
           ))}
           <label style={{ display: "flex", flexDirection: "column", gap: 6, color: C.dark, fontSize: 12, fontWeight: 700 }}>
@@ -126,6 +129,7 @@ export default function StaffPanel() {
             <div style={{ marginTop: 3, color: C.primary, fontSize: 12, fontWeight: 700 }}>{member.role}</div>
             <div style={{ marginTop: 5, color: C.muted, fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{member.email}</div>
           </div>
+          <a href={`https://wa.me/91${String(member.phone).replace(/\D/g, "")}`} target="_blank" rel="noreferrer" aria-label={`Message ${member.name} on WhatsApp`} title={`Message ${member.name} on WhatsApp`} style={{ flexShrink: 0, width: 38, height: 38, display: "grid", placeItems: "center", borderRadius: "50%", background: "#DCFCE7", color: "#15803D", textDecoration: "none", fontSize: 13, fontWeight: 800 }}>WA</a>
           <a href={`tel:${member.phone}`} aria-label={`Call ${member.name}`} title={`Call ${member.name}`} style={{ flexShrink: 0, width: 38, height: 38, display: "grid", placeItems: "center", borderRadius: "50%", background: "#DCFCE7", color: "#15803D", textDecoration: "none", fontSize: 18 }}>☎</a>
           <button type="button" onClick={() => handleDelete(member)} aria-label={`Delete ${member.name}`} title="Delete staff member" style={{ flexShrink: 0, width: 38, height: 38, border: 0, borderRadius: "50%", background: "#FEF2F2", color: C.red, cursor: "pointer", fontSize: 17 }}>⌫</button>
         </article>)}
