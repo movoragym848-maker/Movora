@@ -53,11 +53,69 @@ export async function searchSocialProfiles(req, res, next) {
     if (q.length < 2) return res.json([]);
     const { rows } = await query(`
       SELECT p.user_id, p.username, p.display_name, p.bio, p.avatar_url,
-        EXISTS (SELECT 1 FROM social_follows f WHERE f.follower_id = $1 AND f.following_id = p.user_id) AS following
+        EXISTS (SELECT 1 FROM social_follows f WHERE f.follower_id = $1 AND f.following_id = p.user_id) AS following,
+        CASE
+          WHEN EXISTS (SELECT 1 FROM social_friend_requests r WHERE r.requester_id = $1 AND r.recipient_id = p.user_id AND r.status = 'accepted')
+            OR EXISTS (SELECT 1 FROM social_friend_requests r WHERE r.requester_id = p.user_id AND r.recipient_id = $1 AND r.status = 'accepted') THEN 'accepted'
+          WHEN EXISTS (SELECT 1 FROM social_friend_requests r WHERE r.requester_id = $1 AND r.recipient_id = p.user_id AND r.status = 'pending') THEN 'outgoing_pending'
+          WHEN EXISTS (SELECT 1 FROM social_friend_requests r WHERE r.requester_id = p.user_id AND r.recipient_id = $1 AND r.status = 'pending') THEN 'incoming_pending'
+          ELSE NULL
+        END AS request_status,
+        (SELECT count(*)::int FROM social_follows WHERE following_id = p.user_id) AS followers,
+        (SELECT count(*)::int FROM social_follows WHERE follower_id = p.user_id) AS following_count
       FROM social_profiles p
       WHERE p.user_id <> $1 AND (p.username::text ILIKE $2 OR p.display_name ILIKE $2)
       ORDER BY p.username LIMIT 20`, [userId, `%${q}%`]);
     res.json(rows);
+  } catch (err) { next(err); }
+}
+
+export async function listFriendRequests(req, res, next) {
+  try {
+    const userId = authUser(req);
+    if (!userId) return res.status(403).json({ message: "Social features are available for member accounts." });
+    const [incoming, outgoing] = await Promise.all([
+      query(`SELECT r.id, r.status, r.created_at, p.user_id, p.username, p.display_name, p.avatar_url,
+        EXISTS (SELECT 1 FROM social_follows f WHERE f.follower_id = $1 AND f.following_id = p.user_id) AS following
+        FROM social_friend_requests r JOIN social_profiles p ON p.user_id = r.requester_id
+        WHERE r.recipient_id = $1 AND r.status IN ('pending', 'accepted') ORDER BY r.created_at DESC`, [userId]),
+      query(`SELECT r.id, r.status, r.created_at, p.user_id, p.username, p.display_name, p.avatar_url,
+        EXISTS (SELECT 1 FROM social_follows f WHERE f.follower_id = $1 AND f.following_id = p.user_id) AS following
+        FROM social_friend_requests r JOIN social_profiles p ON p.user_id = r.recipient_id
+        WHERE r.requester_id = $1 AND r.status IN ('pending', 'accepted') ORDER BY r.created_at DESC`, [userId]),
+    ]);
+    res.json({ incoming: incoming.rows, outgoing: outgoing.rows });
+  } catch (err) { next(err); }
+}
+
+export async function sendFriendRequest(req, res, next) {
+  try {
+    const userId = authUser(req);
+    if (!userId) return res.status(403).json({ message: "Social features are available for member accounts." });
+    const targetId = req.params.userId;
+    if (targetId === userId) return res.status(400).json({ message: "You cannot send a request to yourself." });
+    const target = await query("SELECT 1 FROM social_profiles WHERE user_id = $1", [targetId]);
+    if (!target.rowCount) return res.status(404).json({ message: "User not found." });
+    const existing = await query("SELECT status FROM social_friend_requests WHERE requester_id = $1 AND recipient_id = $2", [userId, targetId]);
+    if (existing.rows[0]?.status === "accepted") return res.json({ status: "accepted", following: true });
+    await query("INSERT INTO social_follows (follower_id, following_id) VALUES ($1, $2) ON CONFLICT DO NOTHING", [userId, targetId]);
+    await query(`INSERT INTO social_friend_requests (requester_id, recipient_id, status, responded_at)
+      VALUES ($1, $2, 'pending', NULL)
+      ON CONFLICT (requester_id, recipient_id) DO UPDATE SET status = 'pending', created_at = now(), responded_at = NULL`, [userId, targetId]);
+    res.status(201).json({ status: "pending", following: true });
+  } catch (err) { next(err); }
+}
+
+export async function respondToFriendRequest(req, res, next) {
+  try {
+    const userId = authUser(req);
+    if (!userId) return res.status(403).json({ message: "Social features are available for member accounts." });
+    const status = req.body?.status;
+    if (status !== "accepted") return res.status(400).json({ message: "Friend requests can only be accepted." });
+    const request = await query("SELECT requester_id FROM social_friend_requests WHERE id = $1 AND recipient_id = $2 AND status = 'pending'", [req.params.requestId, userId]);
+    if (!request.rowCount) return res.status(404).json({ message: "Friend request not found." });
+    await query("UPDATE social_friend_requests SET status = $1, responded_at = now() WHERE id = $2", [status, req.params.requestId]);
+    res.json({ status });
   } catch (err) { next(err); }
 }
 
@@ -111,6 +169,9 @@ export async function createReel(req, res, next) {
 }
 
 async function getConversation(userId, otherId) {
+  const friendship = await query(`SELECT 1 FROM social_friend_requests
+    WHERE status = 'accepted' AND ((requester_id = $1 AND recipient_id = $2) OR (requester_id = $2 AND recipient_id = $1))`, [userId, otherId]);
+  if (!friendship.rowCount) return null;
   const [a, b] = [userId, otherId].sort();
   const { rows } = await query(`INSERT INTO social_conversations (participant_a, participant_b) VALUES ($1, $2) ON CONFLICT (participant_a, participant_b) DO UPDATE SET participant_a = EXCLUDED.participant_a RETURNING id`, [a, b]);
   return rows[0].id;
@@ -126,7 +187,11 @@ export async function listConversations(req, res, next) {
       FROM social_conversations c
       JOIN social_profiles p ON p.user_id = CASE WHEN c.participant_a = $1 THEN c.participant_b ELSE c.participant_a END
       LEFT JOIN LATERAL (SELECT body, created_at FROM social_messages WHERE conversation_id = c.id ORDER BY created_at DESC LIMIT 1) m ON true
-      WHERE c.participant_a = $1 OR c.participant_b = $1 ORDER BY m.created_at DESC NULLS LAST`, [userId]);
+      WHERE (c.participant_a = $1 OR c.participant_b = $1)
+        AND EXISTS (SELECT 1 FROM social_friend_requests r WHERE r.status = 'accepted'
+          AND ((r.requester_id = $1 AND r.recipient_id = CASE WHEN c.participant_a = $1 THEN c.participant_b ELSE c.participant_a END)
+            OR (r.requester_id = CASE WHEN c.participant_a = $1 THEN c.participant_b ELSE c.participant_a END AND r.recipient_id = $1)))
+      ORDER BY m.created_at DESC NULLS LAST`, [userId]);
     res.json(rows);
   } catch (err) { next(err); }
 }
@@ -135,7 +200,11 @@ export async function listMessages(req, res, next) {
   try {
     const userId = authUser(req);
     if (!userId) return res.status(403).json({ message: "Social features are available for member accounts." });
-    const conversation = await query("SELECT id FROM social_conversations WHERE id = $1 AND (participant_a = $2 OR participant_b = $2)", [req.params.conversationId, userId]);
+    const conversation = await query(`SELECT c.id FROM social_conversations c
+      WHERE c.id = $1 AND (c.participant_a = $2 OR c.participant_b = $2)
+      AND EXISTS (SELECT 1 FROM social_friend_requests r WHERE r.status = 'accepted'
+        AND ((r.requester_id = $2 AND r.recipient_id = CASE WHEN c.participant_a = $2 THEN c.participant_b ELSE c.participant_a END)
+          OR (r.requester_id = CASE WHEN c.participant_a = $2 THEN c.participant_b ELSE c.participant_a END AND r.recipient_id = $2)))`, [req.params.conversationId, userId]);
     if (!conversation.rowCount) return res.status(404).json({ message: "Conversation not found." });
     const { rows } = await query("SELECT id, sender_id, body, created_at, read_at FROM social_messages WHERE conversation_id = $1 ORDER BY created_at ASC LIMIT 100", [req.params.conversationId]);
     res.json(rows);
@@ -148,6 +217,7 @@ export async function sendMessage(req, res, next) {
     if (!userId) return res.status(403).json({ message: "Social features are available for member accounts." });
     const input = messageSchema.parse(req.body);
     const conversationId = await getConversation(userId, req.params.userId);
+    if (!conversationId) return res.status(403).json({ message: "You can message this person after they accept your friend request." });
     const { rows } = await query("INSERT INTO social_messages (conversation_id, sender_id, body) VALUES ($1, $2, $3) RETURNING id, sender_id, body, created_at, read_at", [conversationId, userId, input.body]);
     res.status(201).json({ conversationId, message: rows[0] });
   } catch (err) {

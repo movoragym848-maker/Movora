@@ -156,6 +156,9 @@ export const checkIn = payload => request("/v1/attendance/check-in", { method:"P
 export const getSocialProfile = () => request("/social/profile");
 export const saveSocialProfile = payload => request("/social/profile", { method:"PUT", body:JSON.stringify(payload) });
 export const searchSocialProfiles = query => request(`/social/search?q=${encodeURIComponent(query)}`);
+export const getFriendRequests = () => request("/social/requests");
+export const sendFriendRequest = userId => request(`/social/users/${encodeURIComponent(userId)}/request`, { method:"POST" });
+export const respondToFriendRequest = (requestId, status) => request(`/social/requests/${encodeURIComponent(requestId)}/respond`, { method:"POST", body:JSON.stringify({ status }) });
 export const toggleSocialFollow = userId => request(`/social/users/${encodeURIComponent(userId)}/follow`, { method:"POST" });
 export const getSocialReels = cursor => request(`/social/reels?limit=8${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`);
 export const createSocialReel = payload => request("/social/reels", { method:"POST", body:JSON.stringify(payload) });

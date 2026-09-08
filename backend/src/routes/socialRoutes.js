@@ -1,12 +1,15 @@
 import { Router } from "express";
 import { requireAuth } from "../middleware/auth.js";
-import { createReel, getSocialProfile, listConversations, listMessages, listReels, saveSocialProfile, searchSocialProfiles, sendMessage, toggleFollow } from "../controllers/socialController.js";
+import { createReel, getSocialProfile, listConversations, listFriendRequests, listMessages, listReels, respondToFriendRequest, saveSocialProfile, searchSocialProfiles, sendFriendRequest, sendMessage, toggleFollow } from "../controllers/socialController.js";
 
 export const socialRoutes = Router();
 socialRoutes.use(requireAuth);
 socialRoutes.get("/profile", getSocialProfile);
 socialRoutes.put("/profile", saveSocialProfile);
 socialRoutes.get("/search", searchSocialProfiles);
+socialRoutes.get("/requests", listFriendRequests);
+socialRoutes.post("/users/:userId/request", sendFriendRequest);
+socialRoutes.post("/requests/:requestId/respond", respondToFriendRequest);
 socialRoutes.post("/users/:userId/follow", toggleFollow);
 socialRoutes.get("/reels", listReels);
 socialRoutes.post("/reels", createReel);

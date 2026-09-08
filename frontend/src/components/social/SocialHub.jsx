@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { C } from "../../constants/data";
-import { createSocialReel, getSocialConversations, getSocialMessages, getSocialProfile, getSocialReels, saveSocialProfile, searchSocialProfiles, sendSocialMessage, toggleSocialFollow } from "../../services/api";
+import { createSocialReel, getFriendRequests, getSocialConversations, getSocialMessages, getSocialProfile, getSocialReels, respondToFriendRequest, saveSocialProfile, searchSocialProfiles, sendFriendRequest, sendSocialMessage, toggleSocialFollow } from "../../services/api";
+import "./SocialHub.css";
 
 const usernamePattern = /^[a-z0-9._]{3,30}$/;
 const emptyProfile = { username: "", displayName: "", bio: "", avatarUrl: null };
+const NOTE_TTL_MS = 25 * 60 * 60 * 1000;
 
 function initials(name) {
   return (name || "Movora").split(" ").map(part => part[0]).join("").slice(0, 2).toUpperCase();
@@ -79,19 +81,91 @@ function Messages({ profile }) {
   const [messages, setMessages] = useState([]);
   const [body, setBody] = useState("");
   const [error, setError] = useState("");
+  const [requests, setRequests] = useState({ incoming:[], outgoing:[] });
+  const [requestsOpen, setRequestsOpen] = useState(false);
+  const [note, setNote] = useState("");
+  const [noteDraft, setNoteDraft] = useState("");
+  const [noteOpen, setNoteOpen] = useState(false);
+  const noteInputRef = useRef(null);
   useEffect(() => { getSocialConversations().then(setConversations).catch(err => setError(err.message)); }, []);
+  const refreshRequests = () => getFriendRequests().then(setRequests).catch(err => setError(err.message));
+  useEffect(() => { refreshRequests(); }, []);
+  useEffect(() => {
+    const storageKey = `movora-note-${profile.user_id}`;
+    const loadNote = () => {
+      const stored = window.localStorage.getItem(storageKey);
+      if (!stored) {
+        setNote("");
+        return;
+      }
+
+      try {
+        const savedNote = JSON.parse(stored);
+        if (savedNote.createdAt && Date.now() - savedNote.createdAt < NOTE_TTL_MS) {
+          setNote(savedNote.text || "");
+          return;
+        }
+      } catch {
+        // Remove notes saved before expiration metadata was added.
+      }
+
+      window.localStorage.removeItem(storageKey);
+      setNote("");
+    };
+
+    loadNote();
+    const expiryTimer = window.setInterval(loadNote, 60000);
+    return () => window.clearInterval(expiryTimer);
+  }, [profile.user_id]);
+  useEffect(() => {
+    if (!noteOpen) return undefined;
+    const focusTimer = window.setTimeout(() => noteInputRef.current?.focus(), 240);
+    return () => window.clearTimeout(focusTimer);
+  }, [noteOpen]);
   useEffect(() => { if (query.trim().length < 2) return setResults([]); const timer = setTimeout(() => searchSocialProfiles(query).then(setResults).catch(err => setError(err.message)), 250); return () => clearTimeout(timer); }, [query]);
   useEffect(() => { if (!selected || selected.newChat) return; getSocialMessages(selected.id).then(setMessages).catch(err => setError(err.message)); }, [selected]);
-  const chooseUser = user => { setSelected({ ...user, id:user.user_id, newChat:true }); setQuery(""); setResults([]); };
+  const chooseUser = user => { setSelected({ ...user, id:user.user_id, newChat:true }); setMessages([]); setQuery(""); setResults([]); };
+  const requestUser = async user => {
+    try {
+      const result = await sendFriendRequest(user.user_id);
+      setResults(current => current.map(item => item.user_id === user.user_id ? { ...item, following:true, request_status:result.status === "accepted" ? "accepted" : "outgoing_pending" } : item));
+      await refreshRequests();
+    } catch (err) { setError(err.message); }
+  };
+  const respondToRequest = async (requestId, status, userId) => {
+    try {
+      await respondToFriendRequest(requestId, status);
+      setResults(current => current.map(item => item.user_id === userId ? { ...item, request_status:status === "accepted" ? "accepted" : null, following:status === "accepted" ? item.following : false } : item));
+      await refreshRequests();
+    } catch (err) { setError(err.message); }
+  };
+  const followBack = async userId => {
+    try { await toggleSocialFollow(userId); await refreshRequests(); }
+    catch (err) { setError(err.message); }
+  };
   const send = async event => { event.preventDefault(); if (!body.trim() || !selected) return; try { const data = await sendSocialMessage(selected.user_id, body); setMessages(current => [...current, data.message]); setSelected(current => ({ ...current, id:data.conversationId, newChat:false })); setBody(""); setConversations(await getSocialConversations()); } catch (err) { setError(err.message); } };
-  return <div style={{ display:"grid", gap:14 }}>
-    <div><h1 style={{ margin:0, color:C.dark, fontFamily:"'Barlow Condensed',sans-serif", fontSize:28 }}>Messages</h1><p style={{ margin:"4px 0 0", color:C.muted, fontSize:14 }}>Find your people and keep moving together.</p></div>
-    {error && <div role="alert" style={{ padding:11, borderRadius:8, background:"#FEF2F2", color:"#991B1B", fontSize:13 }}>{error}</div>}
-    <label style={{ color:C.dark, fontSize:12, fontWeight:700 }}>Search people<input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search by @username or name" style={{ display:"block", width:"100%", marginTop:6, padding:12, border:`1px solid ${C.border}`, borderRadius:9, background:C.card, color:C.dark, font:"inherit" }} /></label>
-    {results.length > 0 && <div style={{ display:"grid", gap:8 }}>{results.map(user => <div key={user.user_id} style={{ display:"flex", alignItems:"center", gap:10, padding:10, background:C.card, border:`1px solid ${C.border}`, borderRadius:10 }}><Avatar name={user.display_name} src={user.avatar_url} size={38}/><div style={{ flex:1 }}><strong style={{ color:C.dark }}>{user.display_name}</strong><div style={{ color:C.muted, fontSize:12 }}>@{user.username}</div></div><button type="button" onClick={() => toggleSocialFollow(user.user_id).then(result => setResults(current => current.map(item => item.user_id === user.user_id ? { ...item, following:result.following } : item)))} style={{ border:0, borderRadius:8, padding:"7px 10px", background:user.following ? C.surface : C.primary, color:user.following ? C.dark : "#fff", fontWeight:700, cursor:"pointer" }}>{user.following ? "Following" : "Follow"}</button><button type="button" onClick={() => chooseUser(user)} style={{ border:`1px solid ${C.border}`, borderRadius:8, padding:"7px 10px", background:C.card, color:C.dark, fontWeight:700, cursor:"pointer" }}>Message</button></div>)}</div>}
-    <div style={{ display:"grid", gridTemplateColumns:"minmax(120px, .8fr) minmax(0, 1.4fr)", gap:12, minHeight:360 }}>
-      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12, padding:10 }}><div style={{ color:C.dark, fontWeight:800, marginBottom:8 }}>Chats</div>{conversations.length === 0 ? <div style={{ color:C.muted, fontSize:12, padding:10 }}>No chats yet.</div> : conversations.map(chat => <button key={chat.id} type="button" onClick={() => setSelected({ ...chat, user_id:chat.user_id })} style={{ display:"flex", width:"100%", alignItems:"center", gap:8, border:0, background:selected?.id === chat.id ? C.surface : "transparent", borderRadius:8, padding:8, textAlign:"left", cursor:"pointer" }}><Avatar name={chat.display_name} src={chat.avatar_url} size={32}/><span style={{ minWidth:0, color:C.dark, fontSize:12, overflow:"hidden", textOverflow:"ellipsis" }}>{chat.display_name}</span></button>)}</div>
-      <div style={{ display:"flex", flexDirection:"column", background:C.card, border:`1px solid ${C.border}`, borderRadius:12, padding:12 }}>{selected ? <><div style={{ paddingBottom:10, borderBottom:`1px solid ${C.border}`, color:C.dark, fontWeight:800 }}>@{selected.username}</div><div style={{ flex:1, display:"flex", flexDirection:"column", gap:7, padding:"12px 0", overflowY:"auto" }}>{messages.map(message => <div key={message.id} style={{ alignSelf:message.sender_id === profile.user_id ? "flex-end" : "flex-start", maxWidth:"80%", padding:"8px 10px", borderRadius:10, background:message.sender_id === profile.user_id ? C.primary : C.surface, color:message.sender_id === profile.user_id ? "#fff" : C.dark, fontSize:13 }}>{message.body}</div>)}</div><form onSubmit={send} style={{ display:"flex", gap:8 }}><input value={body} onChange={e => setBody(e.target.value)} placeholder="Write a message..." style={{ flex:1, minWidth:0, padding:10, border:`1px solid ${C.border}`, borderRadius:8, background:C.surface, color:C.dark, font:"inherit" }}/><button type="submit" style={{ border:0, borderRadius:8, background:C.primary, color:"#fff", padding:"0 14px", fontWeight:700, cursor:"pointer" }}>Send</button></form></> : <div style={{ margin:"auto", textAlign:"center", color:C.muted, fontSize:13 }}>Search for someone to start a conversation.</div>}</div>
+  const openNote = () => { setNoteDraft(note); setNoteOpen(true); };
+  const saveNote = () => {
+    const nextNote = noteDraft.trim().slice(0, 80);
+    const storageKey = `movora-note-${profile.user_id}`;
+    if (nextNote) window.localStorage.setItem(storageKey, JSON.stringify({ text:nextNote, createdAt:Date.now() }));
+    else window.localStorage.removeItem(storageKey);
+    setNote(nextNote);
+    setNoteOpen(false);
+  };
+  return <div className="social-messages">
+    <div className="messages-heading"><div><h1>Messages</h1><p>Train together, stay connected.</p></div><div className="messages-heading-actions">{noteOpen && <button type="button" className="note-save-action" onClick={saveNote}>Done</button>}<button type="button" className="requests-button" onClick={() => setRequestsOpen(current => !current)} aria-expanded={requestsOpen}>Requests{requests.incoming.filter(request => request.status === "pending").length > 0 && <span>{requests.incoming.filter(request => request.status === "pending").length}</span>}</button></div></div>
+    {requestsOpen && <div className="requests-panel"><div className="requests-panel-heading"><strong>Friend requests</strong><button type="button" onClick={() => setRequestsOpen(false)} aria-label="Close friend requests">×</button></div>{requests.incoming.length > 0 ? <div className="request-group"><div className="request-label">Incoming</div>{requests.incoming.map(request => <div className="request-row" key={request.id}><Avatar name={request.display_name} src={request.avatar_url} size={38}/><div className="person-copy"><strong>{request.display_name}</strong><span>@{request.username}</span></div>{request.status === "pending" ? <button type="button" className="request-accept" onClick={() => respondToRequest(request.id, "accepted", request.user_id)}>Accept</button> : <span className="request-pending">Accepted</span>}{request.following ? <span className="request-pending">Following</span> : <button type="button" className="request-accept" onClick={() => followBack(request.user_id)}>Follow back</button>}</div>)}</div> : <p className="requests-empty">No incoming requests.</p>}{requests.outgoing.length > 0 && <div className="request-group"><div className="request-label">Sent</div>{requests.outgoing.map(request => <div className="request-row" key={request.id}><Avatar name={request.display_name} src={request.avatar_url} size={38}/><div className="person-copy"><strong>{request.display_name}</strong><span>@{request.username}</span></div><span className="request-pending">{request.status === "accepted" ? "Accepted" : "Pending"}</span></div>)}</div>}</div>}
+    <div className="messages-search"><div className="search-field"><span aria-hidden="true">⌕</span><input id="people-search" aria-label="Search by username or name" value={query} onChange={e => setQuery(e.target.value)} placeholder="Search by @username or name" /></div></div>
+    <div className="discover-row" aria-label="Discover people">
+      <button type="button" className={`discover-item note-trigger${noteOpen ? " is-hidden" : ""}`} onClick={openNote} aria-label={note ? `Edit your note: ${note}` : "Write your note"}><div className="note-cloud-wrap">{note && <span className="note-cloud">{note}</span>}<div className="discover-avatar discover-note"><span>✦</span></div></div><strong>Your note</strong></button>
+    </div>
+    {noteOpen && <div className="note-overlay"><div className="note-composer" role="dialog" aria-label="Write your note"><div className="discover-avatar discover-note"><span>✦</span></div><input ref={noteInputRef} className="note-input" value={noteDraft} onChange={event => setNoteDraft(event.target.value.slice(0, 80))} maxLength={80} placeholder="What are you up to?" aria-label="Your note" /></div></div>}
+    {error && <div role="alert" className="messages-error">{error}</div>}
+    {results.length > 0 && <div className="people-results"><div className="section-label">People</div>{results.map(user => <div className="person-result" key={user.user_id}><Avatar name={user.display_name} src={user.avatar_url} size={46}/><div className="person-copy"><strong>{user.display_name}</strong><span>@{user.username} · {user.followers} followers</span></div>{user.request_status === "accepted" ? <button type="button" className="message-button" onClick={() => chooseUser(user)}>Message</button> : user.request_status === "outgoing_pending" ? <span className="request-pending">Requested</span> : user.request_status === "incoming_pending" ? <button type="button" className="request-accept" onClick={() => refreshRequests().then(() => setRequestsOpen(true))}>Review request</button> : <button type="button" className="message-button" onClick={() => requestUser(user)}>Add friend</button>}</div>)}</div>}
+    <div className={`inbox-layout${selected ? " has-selection" : ""}`}>
+      <section className="conversation-list"><div className="inbox-title"><h2>Chats</h2><span>{conversations.length || ""}</span></div>{conversations.length === 0 ? <div className="empty-chats"><span>○</span><p>Your conversations will appear here.</p><small>Search above to find a training partner.</small></div> : conversations.map(chat => <button className={`conversation-row${selected?.id === chat.id ? " active" : ""}`} key={chat.id} type="button" onClick={() => setSelected({ ...chat, user_id:chat.user_id })}><Avatar name={chat.display_name} src={chat.avatar_url} size={50}/><span className="conversation-copy"><strong>{chat.display_name}</strong><small>@{chat.username}</small></span><span className="conversation-arrow">›</span></button>)}</section>
+      {selected && <section className="conversation-panel"><div className="conversation-header"><button className="back-button" type="button" onClick={() => setSelected(null)} aria-label="Back to chats">‹</button><Avatar name={selected.display_name} src={selected.avatar_url} size={42}/><div><strong>{selected.display_name}</strong><small>@{selected.username}</small></div></div><div className="message-history">{messages.length === 0 && <div className="new-conversation">Start a conversation with <strong>{selected.display_name}</strong>.</div>}{messages.map(message => <div className={`message-bubble${message.sender_id === profile.user_id ? " mine" : ""}`} key={message.id}>{message.body}</div>)}</div><form onSubmit={send} className="message-composer"><input value={body} onChange={e => setBody(e.target.value)} placeholder="Write a message..." aria-label="Write a message"/><button type="submit" aria-label="Send message">↑</button></form></section>}
     </div>
   </div>;
 }
