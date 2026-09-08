@@ -118,4 +118,6 @@ export function AuthInput({ label, style: extraStyle, ...props }) {
   );
 }
 
+export { default as ConfettiCanvas } from "./ConfettiCanvas";
+
 
