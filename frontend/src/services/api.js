@@ -1,4 +1,4 @@
-const API_URL = (import.meta.env?.VITE_API_URL || "https://movora-api.onrender.com/api").trim().replace(/\/+$/, "");
+const API_URL = (import.meta.env?.VITE_API_URL || "https://sincere-transformation-production-b923.up.railway.app/api").trim().replace(/\/+$/, "");
 
 if (typeof window !== "undefined") {
   window.MOVORA_API_URL = API_URL;
