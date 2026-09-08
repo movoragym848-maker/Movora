@@ -12,6 +12,8 @@ import * as api from "./services/api";
 import CheckInScreen from "./components/check-in/CheckInScreen";
 import SocialHub from "./components/social/SocialHub";
 
+const SOCIAL_ID_PATTERN = /^[a-z0-9._]{3,30}$/;
+
 export default function App({ user, onLogout }) {
   if (!user || !user.email) {
     console.error("App: Invalid user object received", user);
@@ -153,8 +155,11 @@ export default function App({ user, onLogout }) {
     followers: 0,
     following: 0,
   });
+  const [socialProfile, setSocialProfile] = useState(null);
   const [profileDraft, setProfileDraft] = useState(profile);
   const [showProfileEditor, setShowProfileEditor] = useState(false);
+  const [profileError, setProfileError] = useState("");
+  const [savingProfile, setSavingProfile] = useState(false);
   const [activeMeal, setActiveMeal] = useState("Breakfast");
   const [manualName, setManualName] = useState("");
   const [manualCal, setManualCal] = useState("");
@@ -173,6 +178,38 @@ export default function App({ user, onLogout }) {
   const saveProfile = nextProfile => {
     setProfile(nextProfile);
     saveLS(`rs_profile_${email}`, nextProfile);
+  };
+
+  useEffect(() => {
+    if (tab !== "profile") return;
+    api.getSocialProfile().then(setSocialProfile).catch(() => setSocialProfile(null));
+  }, [tab]);
+
+  const saveProfileEditor = async () => {
+    setProfileError("");
+    const socialId = String(profileDraft.socialId || "").trim().toLowerCase();
+    if (socialProfile && !SOCIAL_ID_PATTERN.test(socialId)) {
+      setProfileError("Unique social ID must be 3-30 characters using lowercase letters, numbers, dots, or underscores.");
+      return;
+    }
+    setSavingProfile(true);
+    try {
+      if (socialProfile) {
+        const updatedSocialProfile = await api.saveSocialProfile({
+          username: socialId,
+          displayName: profileDraft.displayName,
+          bio: profileDraft.bio,
+          avatarUrl: socialProfile.avatar_url || null,
+        });
+        setSocialProfile(updatedSocialProfile);
+      }
+      saveProfile({ ...profileDraft, socialId });
+      setShowProfileEditor(false);
+    } catch (err) {
+      setProfileError(err.message || "Unable to save your profile.");
+    } finally {
+      setSavingProfile(false);
+    }
   };
 
   const toggleGoal = () => {
@@ -1331,7 +1368,7 @@ export default function App({ user, onLogout }) {
               <div style={{ display:"flex", alignItems:"center", gap:18, flexWrap:"wrap" }}>
                 <div style={{ position:"relative", flexShrink:0 }}>
                   {profile.avatar ? <img src={profile.avatar} alt={`${profile.displayName}'s profile`} style={{ width:84, height:84, borderRadius:"50%", objectFit:"cover", border:`3px solid ${C.primary}` }} /> : <Avatar name={profile.displayName} size={84} />}
-                  <button type="button" onClick={() => { setProfileDraft(profile); setShowProfileEditor(true); }} aria-label="Edit profile" title="Edit profile" style={{ position:"absolute", right:-4, bottom:-2, width:30, height:30, borderRadius:"50%", border:`3px solid ${C.card}`, background:C.dark, color:"#fff", fontSize:18, lineHeight:1, cursor:"pointer" }}>+</button>
+                  <button type="button" onClick={() => { setProfileDraft({ ...profile, socialId:socialProfile?.username || "" }); setProfileError(""); setShowProfileEditor(true); }} aria-label="Edit profile" title="Edit profile" style={{ position:"absolute", right:-4, bottom:-2, width:30, height:30, borderRadius:"50%", border:`3px solid ${C.card}`, background:C.dark, color:"#fff", fontSize:18, lineHeight:1, cursor:"pointer" }}>+</button>
                 </div>
                 <div style={{ flex:1, minWidth:180 }}>
                   <div style={{ color:C.dark, fontWeight:800, fontSize:27, fontFamily:"'Barlow Condensed',sans-serif" }}>{profile.displayName}</div>
@@ -1354,10 +1391,12 @@ export default function App({ user, onLogout }) {
                 <button type="button" onClick={() => setShowProfileEditor(false)} aria-label="Close profile editor" style={{ border:0, background:"transparent", color:C.muted, fontSize:23, cursor:"pointer" }}>×</button>
               </div>
               <div style={{ display:"grid", gap:10 }}>
+                {profileError && <div role="alert" style={{ padding:11, borderRadius:8, background:"#FEF2F2", color:"#991B1B", fontSize:13 }}>{profileError}</div>}
                 <label style={{ color:C.dark, fontSize:12, fontWeight:700 }}>Profile photo<input type="file" accept="image/*" onChange={event => { const file = event.target.files?.[0]; if (!file) return; const reader = new FileReader(); reader.onload = () => setProfileDraft(current => ({ ...current, avatar: reader.result })); reader.readAsDataURL(file); }} style={{ display:"block", width:"100%", marginTop:6, color:C.muted, fontSize:12 }} /></label>
                 <label style={{ color:C.dark, fontSize:12, fontWeight:700 }}>Display name<input value={profileDraft.displayName} onChange={event => setProfileDraft(current => ({ ...current, displayName:event.target.value }))} maxLength={60} required style={{ display:"block", width:"100%", marginTop:6, padding:"10px 11px", border:`1px solid ${C.border}`, borderRadius:8, background:C.surface, color:C.dark, font:"inherit" }} /></label>
+                <label style={{ color:C.dark, fontSize:12, fontWeight:700 }}>Unique social ID <span style={{ color:C.muted, fontWeight:500 }}>({socialProfile ? "used for social search" : "create a social account first"})</span><input value={profileDraft.socialId || ""} onChange={event => setProfileDraft(current => ({ ...current, socialId:event.target.value.toLowerCase().replace(/[^a-z0-9._]/g, "").slice(0, 30) }))} maxLength={30} disabled={!socialProfile} placeholder="your.username" style={{ display:"block", width:"100%", marginTop:6, padding:"10px 11px", border:`1px solid ${C.border}`, borderRadius:8, background:socialProfile ? C.surface : C.border, color:C.dark, font:"inherit" }} /></label>
                 <label style={{ color:C.dark, fontSize:12, fontWeight:700 }}>Bio<textarea value={profileDraft.bio} onChange={event => setProfileDraft(current => ({ ...current, bio:event.target.value }))} maxLength={140} rows={3} placeholder="Tell people about your fitness journey" style={{ display:"block", width:"100%", marginTop:6, padding:"10px 11px", border:`1px solid ${C.border}`, borderRadius:8, background:C.surface, color:C.dark, font:"inherit", resize:"vertical" }} /></label>
-                <button type="button" onClick={() => { saveProfile(profileDraft); setShowProfileEditor(false); }} style={{ border:0, borderRadius:9, background:C.primary, color:"#fff", padding:12, fontWeight:700, cursor:"pointer" }}>Save Profile</button>
+                <button type="button" onClick={saveProfileEditor} disabled={savingProfile} style={{ border:0, borderRadius:9, background:C.primary, color:"#fff", padding:12, fontWeight:700, cursor:savingProfile ? "wait" : "pointer" }}>{savingProfile ? "Saving..." : "Save Profile"}</button>
               </div>
             </div>}
 

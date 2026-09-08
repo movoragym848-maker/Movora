@@ -15,7 +15,7 @@ function Avatar({ name, src, size = 42 }) {
   return src ? <img src={src} alt="" style={{ width:size, height:size, borderRadius:"50%", objectFit:"cover", background:C.surface }} /> : <div aria-hidden="true" style={{ width:size, height:size, borderRadius:"50%", display:"grid", placeItems:"center", background:"#DBEAFE", color:C.primary, fontWeight:800 }}>{initials(name)}</div>;
 }
 
-function AccountSetup({ onSaved, initial, isEditing = false }) {
+function AccountSetup({ onSaved, initial }) {
   const [form, setForm] = useState(initial || emptyProfile);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -30,7 +30,7 @@ function AccountSetup({ onSaved, initial, isEditing = false }) {
   };
   return <div style={{ maxWidth:460, margin:"30px auto", background:C.card, border:`1px solid ${C.border}`, borderRadius:16, padding:22 }}>
     <div style={{ fontSize:32, marginBottom:8 }}>✦</div>
-    <h1 style={{ margin:"0 0 6px", color:C.dark, fontFamily:"'Barlow Condensed',sans-serif", fontSize:28 }}>{isEditing ? "Edit your Movora ID" : "Create your Movora ID"}</h1>
+    <h1 style={{ margin:"0 0 6px", color:C.dark, fontFamily:"'Barlow Condensed',sans-serif", fontSize:28 }}>Create your Movora ID</h1>
     <p style={{ margin:"0 0 20px", color:C.muted, fontSize:14 }}>Choose a unique ID so people can find you by username or display name.</p>
     {error && <div role="alert" style={{ marginBottom:14, padding:11, borderRadius:8, background:"#FEF2F2", color:"#991B1B", fontSize:13 }}>{error}</div>}
     <form onSubmit={submit} style={{ display:"grid", gap:12 }}>
@@ -39,7 +39,7 @@ function AccountSetup({ onSaved, initial, isEditing = false }) {
       </label>
       <label style={{ color:C.dark, fontSize:12, fontWeight:700 }}>Display name<input required minLength={2} maxLength={60} value={form.displayName} onChange={e => setForm(current => ({ ...current, displayName:e.target.value }))} placeholder="Your name" style={{ display:"block", width:"100%", marginTop:6, padding:"10px 11px", border:`1px solid ${C.border}`, borderRadius:8, background:C.surface, color:C.dark, font:"inherit" }} /></label>
       <label style={{ color:C.dark, fontSize:12, fontWeight:700 }}>Bio <span style={{ color:C.muted, fontWeight:500 }}>(optional)</span><textarea maxLength={160} rows={3} value={form.bio} onChange={e => setForm(current => ({ ...current, bio:e.target.value }))} placeholder="Your fitness focus" style={{ display:"block", width:"100%", marginTop:6, padding:"10px 11px", border:`1px solid ${C.border}`, borderRadius:8, background:C.surface, color:C.dark, font:"inherit", resize:"vertical" }} /></label>
-      <button type="submit" disabled={saving} style={{ border:0, borderRadius:9, background:C.primary, color:"#fff", padding:12, fontWeight:700, cursor:saving ? "wait" : "pointer" }}>{saving ? "Saving..." : isEditing ? "Save social profile" : "Create Movora ID"}</button>
+      <button type="submit" disabled={saving} style={{ border:0, borderRadius:9, background:C.primary, color:"#fff", padding:12, fontWeight:700, cursor:saving ? "wait" : "pointer" }}>{saving ? "Creating..." : "Create Movora ID"}</button>
     </form>
   </div>;
 }
@@ -73,7 +73,7 @@ function Reels({ profile }) {
   </div>;
 }
 
-function Messages({ profile, onProfileSaved }) {
+function Messages({ profile }) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
   const [conversations, setConversations] = useState([]);
@@ -83,7 +83,6 @@ function Messages({ profile, onProfileSaved }) {
   const [error, setError] = useState("");
   const [requests, setRequests] = useState({ incoming:[], outgoing:[] });
   const [requestsOpen, setRequestsOpen] = useState(false);
-  const [editingProfile, setEditingProfile] = useState(false);
   const [note, setNote] = useState("");
   const [noteDraft, setNoteDraft] = useState("");
   const [noteOpen, setNoteOpen] = useState(false);
@@ -144,13 +143,6 @@ function Messages({ profile, onProfileSaved }) {
     try { await toggleSocialFollow(userId); await refreshRequests(); }
     catch (err) { setError(err.message); }
   };
-  if (editingProfile) {
-    return <AccountSetup
-      isEditing
-      initial={{ username:profile.username || "", displayName:profile.display_name || "", bio:profile.bio || "", avatarUrl:profile.avatar_url || null }}
-      onSaved={savedProfile => { onProfileSaved(savedProfile); setEditingProfile(false); }}
-    />;
-  }
   const send = async event => { event.preventDefault(); if (!body.trim() || !selected) return; try { const data = await sendSocialMessage(selected.user_id, body); setMessages(current => [...current, data.message]); setSelected(current => ({ ...current, id:data.conversationId, newChat:false })); setBody(""); setConversations(await getSocialConversations()); } catch (err) { setError(err.message); } };
   const openNote = () => { setNoteDraft(note); setNoteOpen(true); };
   const saveNote = () => {
@@ -162,7 +154,7 @@ function Messages({ profile, onProfileSaved }) {
     setNoteOpen(false);
   };
   return <div className="social-messages">
-    <div className="messages-heading"><div><h1>Messages</h1><p>Train together, stay connected.</p></div><div className="messages-heading-actions"><button type="button" className="social-profile-edit" onClick={() => setEditingProfile(true)}>Edit profile</button>{noteOpen && <button type="button" className="note-save-action" onClick={saveNote}>Done</button>}<button type="button" className="requests-button" onClick={() => setRequestsOpen(current => !current)} aria-expanded={requestsOpen}>Requests{requests.incoming.filter(request => request.status === "pending").length > 0 && <span>{requests.incoming.filter(request => request.status === "pending").length}</span>}</button></div></div>
+    <div className="messages-heading"><div><h1>Messages</h1><p>Train together, stay connected.</p></div><div className="messages-heading-actions">{noteOpen && <button type="button" className="note-save-action" onClick={saveNote}>Done</button>}<button type="button" className="requests-button" onClick={() => setRequestsOpen(current => !current)} aria-expanded={requestsOpen}>Requests{requests.incoming.filter(request => request.status === "pending").length > 0 && <span>{requests.incoming.filter(request => request.status === "pending").length}</span>}</button></div></div>
     {requestsOpen && <div className="requests-panel"><div className="requests-panel-heading"><strong>Friend requests</strong><button type="button" onClick={() => setRequestsOpen(false)} aria-label="Close friend requests">×</button></div>{requests.incoming.length > 0 ? <div className="request-group"><div className="request-label">Incoming</div>{requests.incoming.map(request => <div className="request-row" key={request.id}><Avatar name={request.display_name} src={request.avatar_url} size={38}/><div className="person-copy"><strong>{request.display_name}</strong><span>@{request.username}</span></div>{request.status === "pending" ? <button type="button" className="request-accept" onClick={() => respondToRequest(request.id, "accepted", request.user_id)}>Accept</button> : <span className="request-pending">Accepted</span>}{request.following ? <span className="request-pending">Following</span> : <button type="button" className="request-accept" onClick={() => followBack(request.user_id)}>Follow back</button>}</div>)}</div> : <p className="requests-empty">No incoming requests.</p>}{requests.outgoing.length > 0 && <div className="request-group"><div className="request-label">Sent</div>{requests.outgoing.map(request => <div className="request-row" key={request.id}><Avatar name={request.display_name} src={request.avatar_url} size={38}/><div className="person-copy"><strong>{request.display_name}</strong><span>@{request.username}</span></div><span className="request-pending">{request.status === "accepted" ? "Accepted" : "Pending"}</span></div>)}</div>}</div>}
     <div className="messages-search"><div className="search-field"><span aria-hidden="true">⌕</span><input id="people-search" aria-label="Search by username or name" value={query} onChange={e => setQuery(e.target.value)} placeholder="Search by @username or name" /></div></div>
     <div className="discover-row" aria-label="Discover people">
@@ -184,5 +176,5 @@ export default function SocialHub({ mode, user }) {
   useEffect(() => { getSocialProfile().then(setProfile).catch(() => setProfile(null)).finally(() => setLoading(false)); }, []);
   if (loading) return <div style={{ padding:50, textAlign:"center", color:C.muted }}>Loading Movora social...</div>;
   if (!profile) return <AccountSetup initial={{ ...emptyProfile, displayName:user.name }} onSaved={setProfile}/>;
-  return mode === "reels" ? <Reels profile={profile}/> : <Messages profile={profile} onProfileSaved={setProfile}/>;
+  return mode === "reels" ? <Reels profile={profile}/> : <Messages profile={profile}/>;
 }
