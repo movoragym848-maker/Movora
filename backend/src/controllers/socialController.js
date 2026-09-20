@@ -9,6 +9,7 @@ const profileSchema = z.object({
 });
 const messageSchema = z.object({ body: z.string().trim().min(1).max(2000) });
 const reelSchema = z.object({ videoUrl: z.string().url().max(2000), thumbnailUrl: z.string().url().max(2000).nullable().optional(), caption: z.string().max(220).optional().default("") });
+const callSignalSchema = z.object({ type: z.enum(["offer", "answer", "candidate", "hangup"]), payload: z.record(z.any()).default({}) });
 
 function authUser(req) { return req.user?.role === "gym_owner" ? null : req.user?.sub; }
 
@@ -19,7 +20,8 @@ export async function getSocialProfile(req, res, next) {
     const { rows } = await query(`
       SELECT p.user_id, p.username, p.display_name, p.bio, p.avatar_url, p.created_at,
         (SELECT count(*)::int FROM social_follows WHERE following_id = p.user_id) AS followers,
-        (SELECT count(*)::int FROM social_follows WHERE follower_id = p.user_id) AS following
+        (SELECT count(*)::int FROM social_follows WHERE follower_id = p.user_id) AS following,
+        (SELECT count(*)::int FROM social_reels WHERE creator_id = p.user_id) AS posts
       FROM social_profiles p WHERE p.user_id = $1`, [userId]);
     res.json(rows[0] || null);
   } catch (err) { next(err); }
@@ -30,13 +32,19 @@ export async function saveSocialProfile(req, res, next) {
     const userId = authUser(req);
     if (!userId) return res.status(403).json({ message: "Social features are available for member accounts." });
     const input = profileSchema.parse(req.body);
-    const { rows } = await query(`
+    await query(`
       INSERT INTO social_profiles (user_id, username, display_name, bio, avatar_url)
       VALUES ($1, $2, $3, $4, $5)
       ON CONFLICT (user_id) DO UPDATE SET username = EXCLUDED.username, display_name = EXCLUDED.display_name,
         bio = EXCLUDED.bio, avatar_url = EXCLUDED.avatar_url, updated_at = now()
-      RETURNING user_id, username, display_name, bio, avatar_url, created_at`,
+      RETURNING user_id`,
       [userId, input.username, input.displayName, input.bio, input.avatarUrl || null]);
+    const { rows } = await query(`
+      SELECT p.user_id, p.username, p.display_name, p.bio, p.avatar_url, p.created_at,
+        (SELECT count(*)::int FROM social_follows WHERE following_id = p.user_id) AS followers,
+        (SELECT count(*)::int FROM social_follows WHERE follower_id = p.user_id) AS following,
+        (SELECT count(*)::int FROM social_reels WHERE creator_id = p.user_id) AS posts
+      FROM social_profiles p WHERE p.user_id = $1`, [userId]);
     res.status(201).json(rows[0]);
   } catch (err) {
     if (err.code === "23505") return res.status(409).json({ message: "That username is already taken." });
@@ -115,7 +123,8 @@ export async function respondToFriendRequest(req, res, next) {
     const request = await query("SELECT requester_id FROM social_friend_requests WHERE id = $1 AND recipient_id = $2 AND status = 'pending'", [req.params.requestId, userId]);
     if (!request.rowCount) return res.status(404).json({ message: "Friend request not found." });
     await query("UPDATE social_friend_requests SET status = $1, responded_at = now() WHERE id = $2", [status, req.params.requestId]);
-    res.json({ status });
+    await query("INSERT INTO social_follows (follower_id, following_id) VALUES ($1, $2) ON CONFLICT DO NOTHING", [userId, request.rows[0].requester_id]);
+    res.json({ status, following: true });
   } catch (err) { next(err); }
 }
 
@@ -181,6 +190,12 @@ export async function listConversations(req, res, next) {
   try {
     const userId = authUser(req);
     if (!userId) return res.status(403).json({ message: "Social features are available for member accounts." });
+    await query(`
+      INSERT INTO social_conversations (participant_a, participant_b)
+      SELECT LEAST(r.requester_id, r.recipient_id), GREATEST(r.requester_id, r.recipient_id)
+      FROM social_friend_requests r
+      WHERE r.status = 'accepted' AND (r.requester_id = $1 OR r.recipient_id = $1)
+      ON CONFLICT (participant_a, participant_b) DO NOTHING`, [userId]);
     const { rows } = await query(`
       SELECT c.id, p.user_id, p.username, p.display_name, p.avatar_url,
         m.body AS last_message, m.created_at AS last_message_at
@@ -224,4 +239,34 @@ export async function sendMessage(req, res, next) {
     if (err instanceof z.ZodError) return res.status(400).json({ message: "Message must contain 1-2000 characters." });
     next(err);
   }
+}
+
+export async function sendCallSignal(req, res, next) {
+  try {
+    const userId = authUser(req);
+    if (!userId) return res.status(403).json({ message: "Social features are available for member accounts." });
+    const targetId = req.params.userId;
+    if (targetId === userId) return res.status(400).json({ message: "You cannot call yourself." });
+    const friendship = await query(`SELECT 1 FROM social_friend_requests
+      WHERE status = 'accepted' AND ((requester_id = $1 AND recipient_id = $2) OR (requester_id = $2 AND recipient_id = $1))`, [userId, targetId]);
+    if (!friendship.rowCount) return res.status(403).json({ message: "You can call this person after they accept your friend request." });
+    const input = callSignalSchema.parse(req.body);
+    const { rows } = await query(`INSERT INTO social_call_signals (sender_id, recipient_id, signal_type, payload)
+      VALUES ($1, $2, $3, $4) RETURNING id, sender_id, recipient_id, signal_type, payload, created_at`, [userId, targetId, input.type, input.payload]);
+    res.status(201).json(rows[0]);
+  } catch (err) {
+    if (err instanceof z.ZodError) return res.status(400).json({ message: "Invalid call signal." });
+    next(err);
+  }
+}
+
+export async function listCallSignals(req, res, next) {
+  try {
+    const userId = authUser(req);
+    if (!userId) return res.status(403).json({ message: "Social features are available for member accounts." });
+    const since = req.query.since ? new Date(req.query.since) : new Date(0);
+    const { rows } = await query(`SELECT id, sender_id, recipient_id, signal_type, payload, created_at
+      FROM social_call_signals WHERE recipient_id = $1 AND created_at > $2 ORDER BY created_at ASC LIMIT 100`, [userId, since]);
+    res.json(rows);
+  } catch (err) { next(err); }
 }

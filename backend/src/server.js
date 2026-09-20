@@ -53,6 +53,14 @@ async function ensureSocialTables() {
     sender_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE, body text NOT NULL CHECK (char_length(body) BETWEEN 1 AND 2000),
     created_at timestamptz NOT NULL DEFAULT now(), read_at timestamptz
   )`);
+  await query(`CREATE TABLE IF NOT EXISTS social_call_signals (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    sender_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    recipient_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    signal_type text NOT NULL CHECK (signal_type IN ('offer', 'answer', 'candidate', 'hangup')),
+    payload jsonb NOT NULL DEFAULT '{}'::jsonb,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`);
   await query("CREATE INDEX IF NOT EXISTS idx_social_reels_created ON social_reels(created_at DESC, id DESC)");
   await query(`CREATE TABLE IF NOT EXISTS social_friend_requests (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -65,6 +73,7 @@ async function ensureSocialTables() {
     CHECK (requester_id <> recipient_id)
   )`);
   await query("CREATE INDEX IF NOT EXISTS idx_social_messages_conversation ON social_messages(conversation_id, created_at DESC)");
+  await query("CREATE INDEX IF NOT EXISTS idx_social_call_signals_recipient ON social_call_signals(recipient_id, created_at ASC)");
   await query("CREATE INDEX IF NOT EXISTS idx_social_friend_requests_recipient ON social_friend_requests(recipient_id, status, created_at DESC)");
   await query("CREATE INDEX IF NOT EXISTS idx_social_friend_requests_requester ON social_friend_requests(requester_id, status, created_at DESC)");
 }
@@ -98,7 +107,7 @@ app.use((err, _req, res, _next) => {
   res.status(500).json({ message: "Internal server error" });
 });
 
-app.listen(env.port, async () => {
+app.listen(env.port, "0.0.0.0", async () => {
   console.log(`Movora API running on http://localhost:${env.port}`);
 
   try {
