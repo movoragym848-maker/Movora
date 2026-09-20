@@ -304,7 +304,7 @@ export async function listCallSignals(req, res, next) {
         p.username AS sender_username, p.display_name AS sender_display_name, p.avatar_url AS sender_avatar_url
       FROM social_call_signals s
       LEFT JOIN social_profiles p ON p.user_id = s.sender_id
-      WHERE s.recipient_id = $1 AND s.created_at > GREATEST($2, now() - interval '2 minutes')
+      WHERE s.recipient_id = $1 AND s.created_at > GREATEST($2, now() - interval '30 seconds')
       ORDER BY s.created_at ASC LIMIT 100`, [userId, since]);
     res.json(rows);
   } catch (err) { next(err); }
