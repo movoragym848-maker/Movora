@@ -76,6 +76,12 @@ async function ensureSocialTables() {
   await query("CREATE INDEX IF NOT EXISTS idx_social_call_signals_recipient ON social_call_signals(recipient_id, created_at ASC)");
   await query("CREATE INDEX IF NOT EXISTS idx_social_friend_requests_recipient ON social_friend_requests(recipient_id, status, created_at DESC)");
   await query("CREATE INDEX IF NOT EXISTS idx_social_friend_requests_requester ON social_friend_requests(requester_id, status, created_at DESC)");
+  await query(`CREATE TABLE IF NOT EXISTS social_notes (
+    user_id uuid PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    text text NOT NULL CHECK (char_length(text) BETWEEN 1 AND 80),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+  )`);
 }
 
 const app = express();

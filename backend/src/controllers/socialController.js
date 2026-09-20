@@ -10,8 +10,43 @@ const profileSchema = z.object({
 const messageSchema = z.object({ body: z.string().trim().min(1).max(2000) });
 const reelSchema = z.object({ videoUrl: z.string().url().max(2000), thumbnailUrl: z.string().url().max(2000).nullable().optional(), caption: z.string().max(220).optional().default("") });
 const callSignalSchema = z.object({ type: z.enum(["offer", "answer", "candidate", "hangup"]), payload: z.record(z.any()).default({}) });
+const noteSchema = z.object({ text: z.string().trim().min(1).max(80) });
 
 function authUser(req) { return req.user?.role === "gym_owner" ? null : req.user?.sub; }
+
+export async function getSocialNotes(req, res, next) {
+  try {
+    const userId = authUser(req);
+    if (!userId) return res.status(403).json({ message: "Social features are available for member accounts." });
+    const { rows } = await query(`
+      SELECT n.user_id, n.text, n.created_at, p.username, p.display_name, p.avatar_url
+      FROM social_notes n JOIN social_profiles p ON p.user_id = n.user_id
+      WHERE n.updated_at > now() - interval '25 hours'
+        AND (n.user_id = $1 OR EXISTS (
+          SELECT 1 FROM social_friend_requests r
+          WHERE r.status = 'accepted' AND ((r.requester_id = $1 AND r.recipient_id = n.user_id)
+            OR (r.requester_id = n.user_id AND r.recipient_id = $1))
+        ))
+      ORDER BY n.updated_at DESC`, [userId]);
+    res.json(rows);
+  } catch (err) { next(err); }
+}
+
+export async function saveSocialNote(req, res, next) {
+  try {
+    const userId = authUser(req);
+    if (!userId) return res.status(403).json({ message: "Social features are available for member accounts." });
+    const input = noteSchema.parse(req.body);
+    const { rows } = await query(`
+      INSERT INTO social_notes (user_id, text) VALUES ($1, $2)
+      ON CONFLICT (user_id) DO UPDATE SET text = EXCLUDED.text, updated_at = now()
+      RETURNING user_id, text, created_at, updated_at`, [userId, input.text]);
+    res.status(201).json(rows[0]);
+  } catch (err) {
+    if (err instanceof z.ZodError) return res.status(400).json({ message: "Note must contain 1-80 characters." });
+    next(err);
+  }
+}
 
 export async function getSocialProfile(req, res, next) {
   try {

@@ -155,6 +155,8 @@ export const verifyPhoneOTP = (phone, otp) => request("/auth/verify-otp", { meth
 export const checkIn = payload => request("/v1/attendance/check-in", { method:"POST", body:JSON.stringify(payload) });
 export const getSocialProfile = () => request("/social/profile");
 export const saveSocialProfile = payload => request("/social/profile", { method:"PUT", body:JSON.stringify(payload) });
+export const getSocialNotes = () => request("/social/notes");
+export const saveSocialNote = text => request("/social/notes", { method:"PUT", body:JSON.stringify({ text }) });
 export const searchSocialProfiles = query => request(`/social/search?q=${encodeURIComponent(query)}`);
 export const getFriendRequests = () => request("/social/requests");
 export const sendFriendRequest = userId => request(`/social/users/${encodeURIComponent(userId)}/request`, { method:"POST" });
@@ -165,3 +167,5 @@ export const createSocialReel = payload => request("/social/reels", { method:"PO
 export const getSocialConversations = () => request("/social/conversations");
 export const getSocialMessages = conversationId => request(`/social/conversations/${encodeURIComponent(conversationId)}/messages`);
 export const sendSocialMessage = (userId, body) => request(`/social/users/${encodeURIComponent(userId)}/messages`, { method:"POST", body:JSON.stringify({ body }) });
+export const getCallSignals = since => request(`/social/calls/signals?since=${encodeURIComponent(since || new Date(0).toISOString())}`);
+export const sendCallSignal = (userId, type, payload = {}) => request(`/social/users/${encodeURIComponent(userId)}/calls/signals`, { method:"POST", body:JSON.stringify({ type, payload }) });
