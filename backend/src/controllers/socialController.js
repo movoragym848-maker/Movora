@@ -265,8 +265,12 @@ export async function listCallSignals(req, res, next) {
     const userId = authUser(req);
     if (!userId) return res.status(403).json({ message: "Social features are available for member accounts." });
     const since = req.query.since ? new Date(req.query.since) : new Date(0);
-    const { rows } = await query(`SELECT id, sender_id, recipient_id, signal_type, payload, created_at
-      FROM social_call_signals WHERE recipient_id = $1 AND created_at > $2 ORDER BY created_at ASC LIMIT 100`, [userId, since]);
+    const { rows } = await query(`SELECT s.id, s.sender_id, s.recipient_id, s.signal_type, s.payload, s.created_at,
+        p.username AS sender_username, p.display_name AS sender_display_name, p.avatar_url AS sender_avatar_url
+      FROM social_call_signals s
+      LEFT JOIN social_profiles p ON p.user_id = s.sender_id
+      WHERE s.recipient_id = $1 AND s.created_at > GREATEST($2, now() - interval '2 minutes')
+      ORDER BY s.created_at ASC LIMIT 100`, [userId, since]);
     res.json(rows);
   } catch (err) { next(err); }
 }
