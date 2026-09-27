@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Capacitor } from "@capacitor/core";
 import { C } from "../../constants/data";
-import { createSocialReel, getCallSignals, getFriendRequests, getSocialConversations, getSocialMessages, getSocialNotes, getSocialProfile, getSocialReels, respondToFriendRequest, saveSocialNote, saveSocialProfile, searchSocialProfiles, sendCallSignal, sendFriendRequest, sendSocialMessage, toggleSocialFollow } from "../../services/api";
+import { createSocialReel, getCallSignals, getFriendRequests, getSocialConversations, getSocialMessages, getSocialNotes, getSocialProfile, getSocialReels, getSocialTyping, respondToFriendRequest, saveSocialNote, saveSocialProfile, searchSocialProfiles, sendCallSignal, sendFriendRequest, sendSocialMessage, setSocialTyping, toggleSocialFollow } from "../../services/api";
 import "./SocialHub.css";
 
 const CallAudio = Capacitor.registerPlugin("CallAudio");
@@ -318,6 +318,7 @@ function Messages({ profile }) {
   const [conversations, setConversations] = useState([]);
   const [selected, setSelected] = useState(null);
   const [messages, setMessages] = useState([]);
+  const [otherTyping, setOtherTyping] = useState(false);
   const [body, setBody] = useState("");
   const [error, setError] = useState("");
   const [requests, setRequests] = useState({ incoming:[], outgoing:[] });
@@ -328,6 +329,12 @@ function Messages({ profile }) {
   const [noteDraft, setNoteDraft] = useState("");
   const [noteOpen, setNoteOpen] = useState(false);
   const noteInputRef = useRef(null);
+  const messageHistoryRef = useRef(null);
+  const messageInputRef = useRef(null);
+  const shouldScrollToLatestRef = useRef(true);
+  const typingUserRef = useRef(null);
+  const typingHeartbeatRef = useRef(null);
+  const typingTimeoutRef = useRef(null);
   const refreshConversations = () => getSocialConversations().then(setConversations).catch(err => setError(`${err.message} (${err.status || "network"})`));
   useEffect(() => { refreshConversations(); }, []);
   const refreshRequests = () => getFriendRequests().then(setRequests).catch(err => setError(err.message));
@@ -358,11 +365,17 @@ function Messages({ profile }) {
       if (loading) return;
       loading = true;
       try {
-        const latestMessages = await getSocialMessages(selected.id);
-        if (mounted) setMessages(current => {
-          const pending = current.filter(message => message.pending);
-          return [...latestMessages, ...pending];
-        });
+        const [latestMessages, typingStatus] = await Promise.all([
+          getSocialMessages(selected.id),
+          getSocialTyping(selected.id).catch(() => ({ typing:false })),
+        ]);
+        if (mounted) {
+          setOtherTyping(typingStatus.typing);
+          setMessages(current => {
+            const pending = current.filter(message => message.pending);
+            return [...latestMessages, ...pending];
+          });
+        }
       } catch (err) {
         if (mounted) setError(err.message);
       } finally {
@@ -376,6 +389,24 @@ function Messages({ profile }) {
       window.clearInterval(timer);
     };
   }, [selected?.id, selected?.newChat]);
+  useLayoutEffect(() => {
+    const history = messageHistoryRef.current;
+    if (!history || messages.length === 0) return;
+    const nearBottom = history.scrollHeight - history.scrollTop - history.clientHeight < 80;
+    if (shouldScrollToLatestRef.current || nearBottom) history.scrollTop = history.scrollHeight;
+    shouldScrollToLatestRef.current = false;
+  }, [messages, otherTyping]);
+  useEffect(() => {
+    shouldScrollToLatestRef.current = true;
+    setOtherTyping(false);
+  }, [selected?.user_id]);
+  useEffect(() => () => {
+    if (typingHeartbeatRef.current) window.clearInterval(typingHeartbeatRef.current);
+    if (typingTimeoutRef.current) window.clearTimeout(typingTimeoutRef.current);
+    const userId = typingUserRef.current;
+    typingUserRef.current = null;
+    if (userId) setSocialTyping(userId, false).catch(() => {});
+  }, [selected?.user_id]);
   const chooseUser = user => { setSelected({ ...user, id:user.user_id, newChat:true }); setMessages([]); setQuery(""); setResults([]); };
   const requestUser = async user => {
     try {
@@ -415,6 +446,35 @@ function Messages({ profile }) {
     avatar_url:request.avatar_url,
   }));
   const chatRows = [...conversations, ...acceptedRequestChats.filter(request => !conversations.some(chat => chat.user_id === request.user_id))];
+  const stopTyping = () => {
+    if (typingHeartbeatRef.current) window.clearInterval(typingHeartbeatRef.current);
+    if (typingTimeoutRef.current) window.clearTimeout(typingTimeoutRef.current);
+    typingHeartbeatRef.current = null;
+    typingTimeoutRef.current = null;
+    const userId = typingUserRef.current;
+    typingUserRef.current = null;
+    if (userId) setSocialTyping(userId, false).catch(() => {});
+  };
+  const updateDraft = value => {
+    setBody(value);
+    if (!selected || !value.trim()) {
+      stopTyping();
+      return;
+    }
+    if (typingUserRef.current !== selected.user_id) {
+      stopTyping();
+      typingUserRef.current = selected.user_id;
+      const announce = () => setSocialTyping(selected.user_id, true).then(result => {
+        setSelected(current => current?.user_id === selected.user_id && current.newChat
+          ? { ...current, id:result.conversationId, newChat:false }
+          : current);
+      }).catch(() => {});
+      announce();
+      typingHeartbeatRef.current = window.setInterval(announce, 2000);
+    }
+    if (typingTimeoutRef.current) window.clearTimeout(typingTimeoutRef.current);
+    typingTimeoutRef.current = window.setTimeout(stopTyping, 1400);
+  };
   const send = async event => {
     event.preventDefault();
     const text = body.trim();
@@ -423,6 +483,8 @@ function Messages({ profile }) {
     const pendingMessage = { id:pendingId, sender_id:profile.user_id, body:text, created_at:new Date().toISOString(), pending:true };
     setMessages(current => [...current, pendingMessage]);
     setBody("");
+    stopTyping();
+    window.requestAnimationFrame(() => messageInputRef.current?.focus());
     setError("");
     try {
       const data = await sendSocialMessage(selected.user_id, text);
@@ -456,8 +518,8 @@ function Messages({ profile }) {
     {error && <div role="alert" className="messages-error">{error}</div>}
     {results.length > 0 && <div className="people-results"><div className="section-label">People</div>{results.map(user => <div className="person-result" key={user.user_id}><Avatar name={user.display_name} src={user.avatar_url} size={46}/><div className="person-copy"><strong>{user.display_name}</strong><span>@{user.username} · {user.followers} followers</span></div>{user.request_status === "accepted" ? <button type="button" className="message-button" onClick={() => chooseUser(user)}>Message</button> : user.request_status === "outgoing_pending" ? <span className="request-pending">Requested</span> : user.request_status === "incoming_pending" ? <button type="button" className="request-accept" onClick={() => refreshRequests().then(() => setRequestsOpen(true))}>Review request</button> : <button type="button" className="message-button" onClick={() => requestUser(user)}>Add friend</button>}</div>)}</div>}
     <div className={`inbox-layout${selected ? " has-selection" : ""}`}>
-      <section className="conversation-list"><div className="inbox-title"><h2>Chats</h2><span>{chatRows.length || ""}</span></div>{chatRows.length === 0 ? <div className="empty-chats"><span>○</span><p>Your conversations will appear here.</p><small>Search above to find a training partner.</small></div> : chatRows.map((chat, index) => <button className={`conversation-row${selected?.user_id === chat.user_id ? " active" : ""}`} key={chat.id || chat.user_id || index} type="button" onClick={() => setSelected({ ...chat, user_id:chat.user_id, newChat:!chat.id })}><Avatar name={chat.display_name} src={chat.avatar_url} size={50}/><span className="conversation-copy"><strong>{chat.display_name}</strong><small>@{chat.username}</small></span><span className="conversation-arrow">›</span></button>)}</section>
-      {selected && <section className="conversation-panel"><div className="conversation-header"><button className="back-button" type="button" onClick={() => setSelected(null)} aria-label="Back to chats">‹</button><Avatar name={selected.display_name} src={selected.avatar_url} size={42}/><div><strong>{selected.display_name}</strong><small>@{selected.username}</small></div></div><div className="message-history">{messages.length === 0 && <div className="new-conversation">Start a conversation with <strong>{selected.display_name}</strong>.</div>}{messages.map(message => <div className={`message-bubble${message.sender_id === profile.user_id ? " mine" : ""}`} key={message.id}>{message.body}</div>)}</div><form onSubmit={send} className="message-composer"><input value={body} onChange={e => setBody(e.target.value)} placeholder="Write a message..." aria-label="Write a message"/><button type="submit" aria-label="Send message">↑</button></form></section>}
+      <section className="conversation-list"><div className="inbox-title"><h2>Chats</h2><span>{chatRows.length || ""}</span></div>{chatRows.length === 0 ? <div className="empty-chats"><span>○</span><p>Your conversations will appear here.</p><small>Search above to find a training partner.</small></div> : chatRows.map((chat, index) => <button className={`conversation-row${selected?.user_id === chat.user_id ? " active" : ""}`} key={chat.id || chat.user_id || index} type="button" onClick={() => { setMessages([]); setSelected({ ...chat, user_id:chat.user_id, newChat:!chat.id }); }}><Avatar name={chat.display_name} src={chat.avatar_url} size={50}/><span className="conversation-copy"><strong>{chat.display_name}</strong><small>@{chat.username}</small></span><span className="conversation-arrow">›</span></button>)}</section>
+      {selected && <section className="conversation-panel"><div className="conversation-header"><button className="back-button" type="button" onClick={() => setSelected(null)} aria-label="Back to chats">‹</button><Avatar name={selected.display_name} src={selected.avatar_url} size={42}/><div><strong>{selected.display_name}</strong><small>@{selected.username}</small></div></div><CallPanel person={selected} onError={setError}/><div className="message-history" ref={messageHistoryRef}>{messages.length === 0 && <div className="new-conversation">Start a conversation with <strong>{selected.display_name}</strong>.</div>}{messages.map(message => <div className={`message-bubble${message.sender_id === profile.user_id ? " mine" : ""}`} key={message.id}>{message.body}</div>)}{otherTyping && <div className="typing-indicator" role="status" aria-label={`${selected.display_name} is typing`}><div className="typing-scene" aria-hidden="true"><div className="teddy"><span className="teddy-ear teddy-ear-left"/><span className="teddy-ear teddy-ear-right"/><span className="teddy-head"><i className="teddy-eye teddy-eye-left"/><i className="teddy-eye teddy-eye-right"/><i className="teddy-muzzle"/><i className="teddy-nose"/></span><span className="teddy-body"/><span className="teddy-leg teddy-leg-left"/><span className="teddy-leg teddy-leg-right"/><span className="teddy-arm teddy-arm-left"/><span className="teddy-arm teddy-arm-right"/></div><div className="teddy-laptop"><span className="laptop-screen"><i/><i/><i/></span><span className="laptop-base"/></div></div><span className="typing-caption">typing</span></div>}</div><form onSubmit={send} className="message-composer"><input ref={messageInputRef} value={body} onChange={e => updateDraft(e.target.value)} placeholder="Write a message..." aria-label="Write a message"/><button type="submit" aria-label="Send message">↑</button></form></section>}
     </div>
   </div>;
 }

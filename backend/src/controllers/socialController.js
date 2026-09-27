@@ -261,6 +261,40 @@ export async function listMessages(req, res, next) {
   } catch (err) { next(err); }
 }
 
+export async function getTypingStatus(req, res, next) {
+  try {
+    const userId = authUser(req);
+    if (!userId) return res.status(403).json({ message: "Social features are available for member accounts." });
+    const friendship = await query(`SELECT 1 FROM social_conversations c
+      WHERE c.id = $1 AND (c.participant_a = $2 OR c.participant_b = $2)
+      AND EXISTS (SELECT 1 FROM social_friend_requests r WHERE r.status = 'accepted'
+        AND ((r.requester_id = $2 AND r.recipient_id = CASE WHEN c.participant_a = $2 THEN c.participant_b ELSE c.participant_a END)
+          OR (r.requester_id = CASE WHEN c.participant_a = $2 THEN c.participant_b ELSE c.participant_a END AND r.recipient_id = $2)))`, [req.params.conversationId, userId]);
+    if (!friendship.rowCount) return res.status(404).json({ message: "Conversation not found." });
+    const { rows } = await query(`SELECT EXISTS (
+      SELECT 1 FROM social_typing_status
+      WHERE conversation_id = $1 AND user_id <> $2 AND updated_at > now() - interval '4 seconds'
+    ) AS typing`, [req.params.conversationId, userId]);
+    res.json({ typing: rows[0].typing });
+  } catch (err) { next(err); }
+}
+
+export async function setTypingStatus(req, res, next) {
+  try {
+    const userId = authUser(req);
+    if (!userId) return res.status(403).json({ message: "Social features are available for member accounts." });
+    const conversationId = await getConversation(userId, req.params.userId);
+    if (!conversationId) return res.status(403).json({ message: "You can message this person after they accept your friend request." });
+    if (req.body?.typing === true) {
+      await query(`INSERT INTO social_typing_status (conversation_id, user_id, updated_at)
+        VALUES ($1, $2, now()) ON CONFLICT (conversation_id, user_id) DO UPDATE SET updated_at = now()`, [conversationId, userId]);
+    } else {
+      await query("DELETE FROM social_typing_status WHERE conversation_id = $1 AND user_id = $2", [conversationId, userId]);
+    }
+    res.json({ conversationId });
+  } catch (err) { next(err); }
+}
+
 export async function sendMessage(req, res, next) {
   try {
     const userId = authUser(req);

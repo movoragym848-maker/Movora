@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { requireAuth } from "../middleware/auth.js";
-import { createReel, getSocialNotes, getSocialProfile, listCallSignals, listConversations, listFriendRequests, listMessages, listReels, respondToFriendRequest, saveSocialNote, saveSocialProfile, searchSocialProfiles, sendCallSignal, sendFriendRequest, sendMessage, toggleFollow } from "../controllers/socialController.js";
+import { createReel, getSocialNotes, getSocialProfile, getTypingStatus, listCallSignals, listConversations, listFriendRequests, listMessages, listReels, respondToFriendRequest, saveSocialNote, saveSocialProfile, searchSocialProfiles, sendCallSignal, sendFriendRequest, sendMessage, setTypingStatus, toggleFollow } from "../controllers/socialController.js";
 
 export const socialRoutes = Router();
 socialRoutes.use(requireAuth);
@@ -17,6 +17,8 @@ socialRoutes.get("/reels", listReels);
 socialRoutes.post("/reels", createReel);
 socialRoutes.get("/conversations", listConversations);
 socialRoutes.get("/conversations/:conversationId/messages", listMessages);
+socialRoutes.get("/conversations/:conversationId/typing", getTypingStatus);
+socialRoutes.post("/users/:userId/typing", setTypingStatus);
 socialRoutes.post("/users/:userId/messages", sendMessage);
 socialRoutes.get("/calls/signals", listCallSignals);
 socialRoutes.post("/users/:userId/calls/signals", sendCallSignal);

@@ -166,6 +166,8 @@ export const getSocialReels = cursor => request(`/social/reels?limit=8${cursor ?
 export const createSocialReel = payload => request("/social/reels", { method:"POST", body:JSON.stringify(payload) });
 export const getSocialConversations = () => request("/social/conversations");
 export const getSocialMessages = conversationId => request(`/social/conversations/${encodeURIComponent(conversationId)}/messages`);
+export const getSocialTyping = conversationId => request(`/social/conversations/${encodeURIComponent(conversationId)}/typing`);
+export const setSocialTyping = (userId, typing) => request(`/social/users/${encodeURIComponent(userId)}/typing`, { method:"POST", body:JSON.stringify({ typing }) });
 export const sendSocialMessage = (userId, body) => request(`/social/users/${encodeURIComponent(userId)}/messages`, { method:"POST", body:JSON.stringify({ body }) });
 export const getCallSignals = since => request(`/social/calls/signals?since=${encodeURIComponent(since || new Date(0).toISOString())}`);
 export const sendCallSignal = (userId, type, payload = {}) => request(`/social/users/${encodeURIComponent(userId)}/calls/signals`, { method:"POST", body:JSON.stringify({ type, payload }) });

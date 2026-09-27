@@ -61,4 +61,32 @@
 @keyframes note-action-in { from { opacity:0; transform:translateY(-8px) scale(.82); } to { opacity:1; transform:translateY(0) scale(1); } }
 @keyframes note-cloud-float { 0% { opacity:.72; transform:translate(-4px, 4px) scale(.82); } 10% { opacity:1; transform:translate(1px, -1px) scale(1.08); } 17% { transform:translate(0, 0) scale(.98); } 25%,75% { transform:translate(0, 0) scale(1); } 50% { transform:translate(3px, -4px) scale(1.025); } 100% { opacity:1; transform:translate(0, 0) scale(1); } }
 @media (max-width: 640px) { .note-cloud { max-width:128px; font-size:11px; } }
+.typing-indicator { align-self:flex-start; display:flex; align-items:center; gap:7px; min-height:66px; padding:2px 12px 2px 6px; border-radius:15px 15px 15px 4px; background:#edf4fb; }
+.typing-scene { position:relative; flex:0 0 94px; width:94px; height:60px; overflow:hidden; }
+.teddy { position:absolute; inset:0; }
+.teddy-head { position:absolute; z-index:2; top:5px; left:18px; width:34px; height:31px; border-radius:48% 48% 45% 45%; background:radial-gradient(ellipse at 34% 28%, #f4c98d 0 10%, #d99954 58%, #bf7439 100%); box-shadow:inset -3px -2px 0 rgba(120,65,34,.12); transform-origin:75% 90%; animation:teddy-head-focus 1.15s ease-in-out infinite; }
+.teddy-ear { position:absolute; z-index:1; top:2px; width:14px; height:15px; border-radius:50%; background:#bf7439; }
+.teddy-ear::after { content:""; position:absolute; inset:4px; border-radius:50%; background:#f0b779; }
+.teddy-ear-left { left:17px; }.teddy-ear-right { left:39px; }
+.teddy-eye { position:absolute; top:12px; width:3px; height:4px; border-radius:50%; background:#38251e; }
+.teddy-eye-left { left:9px; }.teddy-eye-right { left:23px; }
+.teddy-muzzle { position:absolute; top:17px; left:11px; width:14px; height:10px; border-radius:50%; background:#f8dfbb; }
+.teddy-nose { position:absolute; z-index:1; top:19px; left:16px; width:5px; height:4px; border-radius:50% 50% 55% 55%; background:#49302a; }
+.teddy-body { position:absolute; top:30px; left:22px; width:28px; height:25px; border-radius:48% 48% 40% 40%; background:linear-gradient(135deg,#e8b575,#bf7439); }
+.teddy-body::after { content:""; position:absolute; top:7px; left:8px; width:13px; height:12px; border-radius:50%; background:#f3d2a5; }
+.teddy-leg { position:absolute; z-index:1; top:47px; width:16px; height:10px; border-radius:60% 60% 50% 50%; background:#bc7138; }
+.teddy-leg-left { left:16px; transform:rotate(-12deg); }.teddy-leg-right { left:37px; transform:rotate(12deg); }
+.teddy-arm { position:absolute; z-index:3; top:35px; left:39px; width:17px; height:7px; border-radius:8px; background:#cd8547; transform-origin:4px 4px; }
+.teddy-arm-left { animation:teddy-type-left .28s ease-in-out infinite alternate; }.teddy-arm-right { top:39px; left:37px; animation:teddy-type-right .28s ease-in-out .14s infinite alternate; }
+.teddy-laptop { position:absolute; z-index:4; top:25px; left:58px; width:33px; height:29px; }
+.laptop-screen { position:absolute; top:0; left:4px; display:grid; align-content:center; gap:3px; width:25px; height:22px; box-sizing:border-box; padding:4px; border:2px solid #6b9eae; border-radius:3px 3px 1px 1px; background:#d8f2ef; transform:skewY(-5deg); }
+.laptop-screen i { display:block; height:2px; border-radius:2px; background:#79c2b9; animation:laptop-lines .7s ease-in-out infinite alternate; }
+.laptop-screen i:nth-child(2) { width:70%; animation-delay:.2s; }.laptop-screen i:nth-child(3) { width:45%; animation-delay:.4s; }
+.laptop-base { position:absolute; bottom:1px; left:0; width:34px; height:4px; border-radius:1px 1px 4px 4px; background:#5f8994; transform:skewX(-18deg); }
+.typing-caption { color:#647f95; font-size:10px; font-weight:700; }
+@keyframes teddy-head-focus { 0%,100% { transform:rotate(0); } 45%,65% { transform:rotate(11deg) translate(1px,2px); } }
+@keyframes teddy-type-left { from { transform:rotate(-15deg) translateY(1px); } to { transform:rotate(12deg) translateY(4px); } }
+@keyframes teddy-type-right { from { transform:rotate(10deg) translateY(3px); } to { transform:rotate(-18deg) translateY(-1px); } }
+@keyframes laptop-lines { from { opacity:.5; } to { opacity:1; } }
+@media (prefers-reduced-motion: reduce) { .teddy-head,.teddy-arm,.laptop-screen i { animation:none; }.teddy-head { transform:rotate(9deg); } }
 @media (prefers-reduced-motion: reduce) { .note-overlay,.note-composer,.note-save-action,.note-trigger,.note-cloud { animation:none; transition:none; } }
