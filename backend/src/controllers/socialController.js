@@ -13,7 +13,10 @@ const callSignalSchema = z.object({ type: z.enum(["offer", "answer", "candidate"
 const noteSchema = z.object({ text: z.string().trim().min(1).max(80) });
 const reelCommentSchema = z.object({ body:z.string().trim().min(1).max(500) });
 const reelMediaTypes = new Set(["image/jpeg", "image/png", "image/webp", "video/mp4", "video/webm", "video/quicktime", "video/3gpp"]);
-const maxReelMediaBytes = 20 * 1024 * 1024;
+const configuredReelMediaBytes = Number(process.env.REEL_UPLOAD_MAX_BYTES);
+export const maxReelMediaBytes = Number.isSafeInteger(configuredReelMediaBytes) && configuredReelMediaBytes > 0
+  ? configuredReelMediaBytes
+  : 150 * 1024 * 1024;
 
 function authUser(req) { return req.user?.role === "gym_owner" ? null : req.user?.sub; }
 
@@ -193,7 +196,7 @@ export async function listReels(req, res, next) {
     params.push(limit);
     const limitParam = `$${params.length}`;
     const { rows } = await query(`
-      SELECT r.id, r.video_url, r.thumbnail_url, r.caption, r.created_at,
+      SELECT r.id, r.video_url, r.video_hls_url, r.status, r.thumbnail_url, r.caption, r.created_at,
         r.media_type, r.workout_tag, r.location, r.privacy,
         (SELECT count(*)::int FROM social_reel_likes l WHERE l.reel_id = r.id) AS like_count,
         EXISTS (SELECT 1 FROM social_reel_likes l WHERE l.reel_id = r.id AND l.user_id = $1) AS liked,
@@ -224,13 +227,36 @@ export async function createReel(req, res, next) {
   }
 }
 
-async function findVisibleReel(reelId, userId) {
+export async function findVisibleReel(reelId, userId) {
   const { rows } = await query(`SELECT r.id, r.privacy FROM social_reels r WHERE r.id = $1 AND
     (r.privacy = 'public' OR r.creator_id = $2 OR (r.privacy = 'friends' AND EXISTS (
       SELECT 1 FROM social_friend_requests f WHERE f.status = 'accepted' AND
         ((f.requester_id = $2 AND f.recipient_id = r.creator_id) OR (f.requester_id = r.creator_id AND f.recipient_id = $2))
     )))`, [reelId, userId]);
   return rows[0] || null;
+}
+
+export async function getSocialReel(req, res, next) {
+  try {
+    const userId = authUser(req);
+    if (!userId) return res.status(403).json({ message: "Social features are available for member accounts." });
+    const { rows:accessRows } = await query(`SELECT r.id,
+        (r.privacy = 'public' OR r.creator_id = $2 OR (r.privacy = 'friends' AND EXISTS (
+          SELECT 1 FROM social_friend_requests f WHERE f.status = 'accepted' AND
+            ((f.requester_id = $2 AND f.recipient_id = r.creator_id) OR (f.requester_id = r.creator_id AND f.recipient_id = $2))
+        ))) AS can_view
+      FROM social_reels r WHERE r.id = $1`, [req.params.reelId, userId]);
+    if (!accessRows.length) return res.status(404).json({ message:"Shared Reel was not found. Check that the link is correct." });
+    if (!accessRows[0].can_view) return res.status(403).json({ message:"This Reel is limited by its privacy setting. Ask the creator to share it with your account." });
+    const { rows } = await query(`SELECT r.id, r.video_url, r.video_hls_url, r.status, r.thumbnail_url, r.caption, r.created_at,
+      r.media_type, r.workout_tag, r.location, r.privacy,
+        (SELECT count(*)::int FROM social_reel_likes l WHERE l.reel_id = r.id) AS like_count,
+        EXISTS (SELECT 1 FROM social_reel_likes l WHERE l.reel_id = r.id AND l.user_id = $2) AS liked,
+        (SELECT count(*)::int FROM social_reel_comments c WHERE c.reel_id = r.id) AS comment_count,
+        p.user_id, p.username, p.display_name, p.avatar_url
+      FROM social_reels r JOIN social_profiles p ON p.user_id = r.creator_id WHERE r.id = $1`, [req.params.reelId, userId]);
+    res.json(rows[0]);
+  } catch (err) { next(err); }
 }
 
 export async function createUploadedReel(req, res, next) {
@@ -242,7 +268,7 @@ export async function createUploadedReel(req, res, next) {
     const mediaType = String(req.headers["content-type"] || "").split(";")[0].trim().toLowerCase();
     if (!reelMediaTypes.has(mediaType)) return res.status(415).json({ message: "Use a JPEG, PNG, WebP, MP4, WebM, MOV, or 3GP file." });
     if (!Buffer.isBuffer(req.body) || req.body.length === 0) return res.status(400).json({ message: "Post media is required." });
-    if (req.body.length > maxReelMediaBytes) return res.status(413).json({ message: "Post media must be 20 MB or smaller." });
+    if (req.body.length > maxReelMediaBytes) return res.status(413).json({ message: `Media uploads are limited to ${Math.floor(maxReelMediaBytes / 1024 / 1024)} MB.` });
     const input = z.object({
       caption:z.string().max(220).optional().default(""),
       workoutTag:z.string().max(40).optional().default(""),

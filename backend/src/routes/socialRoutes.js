@@ -1,6 +1,6 @@
 import express, { Router } from "express";
 import { requireAuth } from "../middleware/auth.js";
-import { addSocialReelComment, createReel, createUploadedReel, getSocialNotes, getSocialProfile, getSocialReelComments, getSocialReelMedia, getTypingStatus, listCallSignals, listConversations, listFriendRequests, listMessages, listReels, respondToFriendRequest, saveSocialNote, saveSocialProfile, searchSocialProfiles, sendCallSignal, sendFriendRequest, sendMessage, setTypingStatus, toggleFollow, toggleReelLike } from "../controllers/socialController.js";
+import { addSocialReelComment, createReel, createUploadedReel, getSocialNotes, getSocialProfile, getSocialReel, getSocialReelComments, getSocialReelMedia, getTypingStatus, listCallSignals, listConversations, listFriendRequests, listMessages, listReels, maxReelMediaBytes, respondToFriendRequest, saveSocialNote, saveSocialProfile, searchSocialProfiles, sendCallSignal, sendFriendRequest, sendMessage, setTypingStatus, toggleFollow, toggleReelLike } from "../controllers/socialController.js";
 
 export const socialRoutes = Router();
 socialRoutes.use(requireAuth);
@@ -15,7 +15,8 @@ socialRoutes.post("/requests/:requestId/respond", respondToFriendRequest);
 socialRoutes.post("/users/:userId/follow", toggleFollow);
 socialRoutes.get("/reels", listReels);
 socialRoutes.post("/reels", createReel);
-socialRoutes.post("/reels/upload", express.raw({ type:["image/jpeg", "image/png", "image/webp", "video/mp4", "video/webm", "video/quicktime", "video/3gpp"], limit:"20mb" }), createUploadedReel);
+socialRoutes.post("/reels/upload", express.raw({ type:["image/jpeg", "image/png", "image/webp", "video/mp4", "video/webm", "video/quicktime", "video/3gpp"], limit:maxReelMediaBytes }), createUploadedReel);
+socialRoutes.get("/reels/:reelId", getSocialReel);
 socialRoutes.get("/reels/:reelId/media", getSocialReelMedia);
 socialRoutes.post("/reels/:reelId/like", toggleReelLike);
 socialRoutes.get("/reels/:reelId/comments", getSocialReelComments);

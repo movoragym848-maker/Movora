@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import { addSocialReelComment, getSocialReelComments, getSocialReelMedia, getSocialReels, toggleSocialReelLike, uploadSocialReel } from "../../services/api";
+import { DotLottieReact } from "@lottiefiles/dotlottie-react";
+import { addSocialReelComment, createSocialReelFromUpload, getSocialConversations, getSocialReel, getSocialReelComments, getSocialReelMedia, getSocialReelUploadUrl, getSocialReels, resolveApiUrl, sendSocialMessage, toggleSocialReelLike, uploadReelObject, uploadSocialReel } from "../../services/api";
+import likeAnimationUrl from "../../../../like.lottie?url";
 import "./ReelsExperience.css";
 
 const FEED_VIEW = "FEED_VIEW";
 const CAMERA_VIEW = "CAMERA_VIEW";
 const POST_DETAILS_VIEW = "POST_DETAILS_VIEW";
-const MAX_MEDIA_SIZE = 20 * 1024 * 1024;
 const MAX_RECORDING_SECONDS = 30;
 const filters = [
   { id: "original", label: "Original", css: "none" },
@@ -27,12 +28,24 @@ function ReelIcon({ type, filled = false }) {
 function ReelCard({ reel, active, onLike, onComments, onShare }) {
   const [source, setSource] = useState(reel.video_url || "");
   const [mediaError, setMediaError] = useState(false);
+  const [showLikeAnimation, setShowLikeAnimation] = useState(false);
+  const [likeAnimationKey, setLikeAnimationKey] = useState(0);
   const videoRef = useRef(null);
+  const likeAnimationTimerRef = useRef(null);
+  const videoClickTimerRef = useRef(null);
 
   useEffect(() => {
     let cancelled = false;
     let objectUrl = "";
     setMediaError(false);
+    if (reel.status === "processing" || reel.status === "failed") {
+      setSource("");
+      return undefined;
+    }
+    if (reel.video_hls_url) {
+      setSource(resolveApiUrl(reel.video_hls_url));
+      return undefined;
+    }
     if (!reel.media_type) {
       setSource(reel.video_url || "");
       return undefined;
@@ -48,25 +61,100 @@ function ReelCard({ reel, active, onLike, onComments, onShare }) {
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [active, reel.id, reel.media_type, reel.video_url]);
+  }, [active, reel.id, reel.media_type, reel.status, reel.video_hls_url, reel.video_url]);
 
   useEffect(() => {
     const video = videoRef.current;
     if (!video || !source) return;
-    if (active) video.play().catch(() => {});
-    else video.pause();
+    if (!active) {
+      video.pause();
+      return undefined;
+    }
+    if (!source.includes(".m3u8")) {
+      video.play().catch(() => {});
+      return undefined;
+    }
+    const session = JSON.parse(localStorage.getItem("rs_session") || "null");
+    const token = session?.accessToken;
+    let cancelled = false;
+    let hls;
+    const attachStream = async () => {
+      const { default:Hls } = await import("hls.js");
+      if (cancelled) return;
+      if (!Hls.isSupported()) {
+        setMediaError(true);
+        return;
+      }
+      hls = new Hls({
+        startLevel:0,
+        capLevelToPlayerSize:true,
+        maxBufferLength:16,
+        maxMaxBufferLength:32,
+        xhrSetup(xhr) { if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`); },
+      });
+      hls.loadSource(source);
+      hls.attachMedia(video);
+      hls.on(Hls.Events.MANIFEST_PARSED, () => video.play().catch(() => {}));
+      hls.on(Hls.Events.ERROR, (_event, data) => {
+        if (data.fatal) setMediaError(true);
+      });
+    };
+    attachStream().catch(() => { if (!cancelled) setMediaError(true); });
+    return () => { cancelled = true; hls?.destroy(); };
   }, [active, source]);
 
+  useEffect(() => () => {
+    if (likeAnimationTimerRef.current) window.clearTimeout(likeAnimationTimerRef.current);
+    if (videoClickTimerRef.current) window.clearTimeout(videoClickTimerRef.current);
+  }, []);
+
+  const playLikeAnimation = () => {
+    setLikeAnimationKey(key => key + 1);
+    setShowLikeAnimation(true);
+    if (likeAnimationTimerRef.current) window.clearTimeout(likeAnimationTimerRef.current);
+    likeAnimationTimerRef.current = window.setTimeout(() => setShowLikeAnimation(false), 1400);
+  };
+
+  const toggleVideoPlayback = event => {
+    const video = event.currentTarget;
+    if (videoClickTimerRef.current) window.clearTimeout(videoClickTimerRef.current);
+    videoClickTimerRef.current = window.setTimeout(() => {
+      if (video.paused) video.play().catch(() => {});
+      else video.pause();
+      videoClickTimerRef.current = null;
+    }, 250);
+  };
+
+  const likeWithAnimation = event => {
+    if (event.target.closest("button")) return;
+    if (videoClickTimerRef.current) {
+      window.clearTimeout(videoClickTimerRef.current);
+      videoClickTimerRef.current = null;
+    }
+    if (!reel.liked) {
+      playLikeAnimation();
+      onLike(reel);
+    }
+  };
+
+  const likeFromButton = () => {
+    if (!reel.liked) playLikeAnimation();
+    onLike(reel);
+  };
+
   const isImage = reel.media_type?.startsWith("image/");
-  return <article className="reel-page" data-reel-id={reel.id}>
+  return <article className="reel-page" data-reel-id={reel.id} onDoubleClick={likeWithAnimation}>
     {source && (isImage
       ? <img className="reel-media" src={source} alt="" />
-      : <video ref={videoRef} className="reel-media" src={source} poster={reel.thumbnail_url || undefined} playsInline loop muted preload="metadata" onClick={event => event.currentTarget.paused ? event.currentTarget.play().catch(() => {}) : event.currentTarget.pause()} />)}
+      : <video ref={videoRef} className="reel-media" src={source.includes(".m3u8") ? undefined : source} playsInline loop muted preload="metadata" onClick={toggleVideoPlayback} />)}
     {mediaError && <div className="reel-media-error">This post could not be loaded.</div>}
+    {reel.status === "processing" && <div className="reel-processing-status" role="status"><span className="reel-processing-spinner"/>Preparing HD video...</div>}
+    {reel.status === "failed" && <div className="reel-processing-status" role="status">Video processing failed.</div>}
     <div className="reel-shade" />
+    {showLikeAnimation && <div className="reel-like-burst" aria-hidden="true"><DotLottieReact key={likeAnimationKey} src={likeAnimationUrl} autoplay loop={false} /></div>}
     <div className="reel-author"><span className="reel-avatar">{initials(reel.display_name)}</span><strong>{reel.display_name}</strong><span>@{reel.username}</span></div>
     <div className="reel-actions">
-      <button type="button" className={`reel-action${reel.liked ? " is-liked" : ""}`} onClick={() => onLike(reel)} aria-label={reel.liked ? "Unlike reel" : "Like reel"} aria-pressed={Boolean(reel.liked)}><ReelIcon type="heart" filled={reel.liked}/><span>{reel.like_count || 0}</span></button>
+      <button type="button" className={`reel-action${reel.liked ? " is-liked" : ""}`} onClick={likeFromButton} aria-label={reel.liked ? "Unlike reel" : "Like reel"} aria-pressed={Boolean(reel.liked)}><ReelIcon type="heart" filled={reel.liked}/><span>{reel.like_count || 0}</span></button>
       <button type="button" className="reel-action" onClick={() => onComments(reel)} aria-label="Open comments"><ReelIcon type="comment"/><span>{reel.comment_count || 0}</span></button>
       <button type="button" className="reel-action" onClick={() => onShare(reel)} aria-label="Share reel"><ReelIcon type="share"/><span>Share</span></button>
     </div>
@@ -122,7 +210,70 @@ function CommentsSheet({ reel, onClose, onCommentAdded }) {
   </div>;
 }
 
-export default function ReelsExperience() {
+function ShareSheet({ reel, shareUrl, onClose }) {
+  const [friends, setFriends] = useState([]);
+  const [loadingFriends, setLoadingFriends] = useState(true);
+  const [sendingUserId, setSendingUserId] = useState("");
+  const [sentUserIds, setSentUserIds] = useState(() => new Set());
+  const [feedback, setFeedback] = useState("");
+  const [error, setError] = useState("");
+  const canShareLink = Boolean(shareUrl);
+
+  useEffect(() => {
+    let mounted = true;
+    getSocialConversations().then(data => { if (mounted) setFriends(data); }).catch(err => { if (mounted) setError(err.message || "Unable to load friends."); }).finally(() => { if (mounted) setLoadingFriends(false); });
+    return () => { mounted = false; };
+  }, []);
+
+  const shareOnWhatsApp = () => {
+    const message = [reel.caption, shareUrl].filter(Boolean).join("\n");
+    window.open(`https://wa.me/?text=${encodeURIComponent(message)}`, "_blank", "noopener,noreferrer");
+  };
+
+  const copyLink = async () => {
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      setFeedback("Post link copied.");
+      setError("");
+    } catch {
+      setError("Clipboard access is unavailable. Copy the link from your browser address bar.");
+    }
+  };
+
+  const sendToFriend = async friend => {
+    if (sendingUserId) return;
+    setSendingUserId(friend.user_id);
+    setError("");
+    try {
+      const message = [reel.caption || "Check out this Movora post", shareUrl].join("\n");
+      await sendSocialMessage(friend.user_id, message);
+      setSentUserIds(current => new Set(current).add(friend.user_id));
+    } catch (err) { setError(err.message || "Unable to share with this friend."); }
+    finally { setSendingUserId(""); }
+  };
+
+  return <div className="reel-sheet-backdrop" onClick={onClose}>
+    <section className="reel-share-sheet" role="dialog" aria-modal="true" aria-label="Share post" onClick={event => event.stopPropagation()}>
+      <div className="reel-sheet-grip" />
+      <header><strong>Share post</strong><button type="button" onClick={onClose} aria-label="Close share options">×</button></header>
+      <div className="reel-share-actions">
+        <button type="button" onClick={shareOnWhatsApp} disabled={!canShareLink}><span className="share-action-icon whatsapp-share-icon">◉</span><span>WhatsApp</span></button>
+        <button type="button" onClick={copyLink} disabled={!canShareLink}><span className="share-action-icon">↗</span><span>Copy link</span></button>
+      </div>
+      {!canShareLink && <p className="share-needs-url">Set VITE_APP_URL to your public web app URL to share post links from the Android app.</p>}
+      {feedback && <p className="share-feedback" role="status">{feedback}</p>}
+      <div className="share-friends-heading"><strong>Send to a friend</strong><span>{friends.length}</span></div>
+      <div className="share-friends-list">
+        {loadingFriends && <p className="share-empty">Loading friends...</p>}
+        {!loadingFriends && friends.length === 0 && <p className="share-empty">Accepted friends will appear here.</p>}
+        {friends.map(friend => <div className="share-friend" key={friend.user_id}><span className="share-friend-avatar">{initials(friend.display_name)}</span><span className="share-friend-name">{friend.display_name}</span><button type="button" disabled={!canShareLink || sendingUserId === friend.user_id || sentUserIds.has(friend.user_id)} onClick={() => sendToFriend(friend)}>{sentUserIds.has(friend.user_id) ? "Sent" : sendingUserId === friend.user_id ? "Sending..." : "Send"}</button></div>)}
+      </div>
+      {error && <p className="share-error" role="alert">{error}</p>}
+    </section>
+  </div>;
+}
+
+export default function ReelsExperience({ onExit }) {
   const [view, setView] = useState(FEED_VIEW);
   const [reels, setReels] = useState([]);
   const [cursor, setCursor] = useState(null);
@@ -131,6 +282,7 @@ export default function ReelsExperience() {
   const [feedError, setFeedError] = useState("");
   const [activeReelId, setActiveReelId] = useState(null);
   const [commentsReel, setCommentsReel] = useState(null);
+  const [sharingReel, setSharingReel] = useState(null);
   const [cameraFacing, setCameraFacing] = useState("user");
   const [cameraError, setCameraError] = useState("");
   const [cameraReady, setCameraReady] = useState(false);
@@ -145,6 +297,8 @@ export default function ReelsExperience() {
   const [privacy, setPrivacy] = useState("public");
   const [publishing, setPublishing] = useState(false);
   const [publishError, setPublishError] = useState("");
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadStage, setUploadStage] = useState("");
   const feedRef = useRef(null);
   const loadMoreRef = useRef(null);
   const cameraVideoRef = useRef(null);
@@ -169,15 +323,51 @@ export default function ReelsExperience() {
     else setLoading(true);
     setFeedError("");
     try {
+      const sharedReelId = new URLSearchParams(window.location.search).get("reel");
+      if (!nextCursor && sharedReelId) {
+        const sharedReel = await getSocialReel(sharedReelId);
+        const data = await getSocialReels();
+        const items = [sharedReel, ...data.items.filter(item => item.id !== sharedReel.id)];
+        setReels(items);
+        setCursor(data.nextCursor);
+        setActiveReelId(sharedReel.id);
+        requestAnimationFrame(() => feedRef.current?.scrollTo({ top:0, behavior:"instant" }));
+        return;
+      }
       const data = await getSocialReels(nextCursor);
-      setReels(current => nextCursor ? [...current, ...data.items] : data.items);
+      const items = data.items;
+      setReels(current => nextCursor ? [...current, ...items] : items);
       setCursor(data.nextCursor);
-      if (!activeReelId && data.items[0]) setActiveReelId(data.items[0].id);
-    } catch (err) { setFeedError(err.message || "Unable to load reels."); }
+      if (!activeReelId && items[0]) setActiveReelId(items[0].id);
+    } catch (err) {
+      const sharedReelId = new URLSearchParams(window.location.search).get("reel");
+      if (!nextCursor && sharedReelId) setReels([]);
+      if (sharedReelId && err.status === 404) {
+        setFeedError("This Reel link was not found. Check the link and make sure the latest Movora backend is deployed.");
+      } else {
+        setFeedError(err.message || "Unable to load reels.");
+      }
+    }
     finally { setLoading(false); setLoadingMore(false); loadingRef.current = false; }
   };
 
   useEffect(() => { loadPage(null); }, []);
+
+  const pendingReelIds = reels.filter(reel => reel.status === "processing").map(reel => reel.id).join(",");
+  useEffect(() => {
+    const reelIds = pendingReelIds ? pendingReelIds.split(",") : [];
+    if (!reelIds.length) return undefined;
+    let mounted = true;
+    const refreshStatuses = async () => {
+      const updates = await Promise.all(reelIds.map(reelId => getSocialReel(reelId).catch(() => null)));
+      if (!mounted) return;
+      const latestById = new Map(updates.filter(Boolean).map(reel => [reel.id, reel]));
+      setReels(current => current.map(reel => latestById.get(reel.id) || reel));
+    };
+    const timer = window.setInterval(refreshStatuses, 3000);
+    refreshStatuses();
+    return () => { mounted = false; window.clearInterval(timer); };
+  }, [pendingReelIds]);
 
   useEffect(() => {
     if (view !== FEED_VIEW || !feedRef.current || !loadMoreRef.current) return undefined;
@@ -378,10 +568,6 @@ export default function ReelsExperience() {
     const file = event.target.files?.[0];
     event.target.value = "";
     if (!file) return;
-    if (file.size > MAX_MEDIA_SIZE) {
-      setCameraError("Choose a photo or video smaller than 20 MB.");
-      return;
-    }
     if (!file.type.startsWith("video/") && !file.type.startsWith("image/")) {
       setCameraError("Choose a photo or video file.");
       return;
@@ -400,14 +586,21 @@ export default function ReelsExperience() {
   const publish = async event => {
     event.preventDefault();
     if (!capturedMedia || publishing) return;
-    if (capturedMedia.size > MAX_MEDIA_SIZE) {
-      setPublishError("This media is larger than 20 MB. Record a shorter clip or choose a smaller file.");
-      return;
-    }
     setPublishing(true);
     setPublishError("");
+    setUploadProgress(0);
     try {
-      await uploadSocialReel(capturedMedia, { caption, workoutTag, location, privacy });
+      if (capturedMedia.type.startsWith("video/")) {
+        setUploadStage("Preparing secure upload...");
+        const upload = await getSocialReelUploadUrl(capturedMedia.type, capturedMedia.size);
+        setUploadStage("Uploading video to R2...");
+        await uploadReelObject(upload.upload_url, capturedMedia, upload.required_headers, setUploadProgress);
+        setUploadStage("Starting HD video processing...");
+        await createSocialReelFromUpload({ object_key:upload.object_key, caption, workoutTag, location, privacy });
+      } else {
+        setUploadStage("Uploading photo...");
+        await uploadSocialReel(capturedMedia, { caption, workoutTag, location, privacy });
+      }
       const data = await getSocialReels();
       setReels(data.items);
       setCursor(data.nextCursor);
@@ -416,16 +609,15 @@ export default function ReelsExperience() {
       setWorkoutTag("");
       setLocation("");
       setPrivacy("public");
+      setUploadStage("");
+      setUploadProgress(0);
       retake();
       setView(FEED_VIEW);
       requestAnimationFrame(() => feedRef.current?.scrollTo({ top:0, behavior:"smooth" }));
     } catch (error) {
-      const uploadRouteMissing = error.status === 404 && error.url?.includes("/social/reels/upload");
-      setPublishError(uploadRouteMissing
-        ? "The Reel upload endpoint was not found. Deploy the latest Movora backend to Railway, then try again."
-        : error.message || "Unable to publish this post.");
+      setPublishError(error.message || "Unable to publish this post.");
     }
-    finally { setPublishing(false); }
+    finally { setPublishing(false); setUploadStage(""); }
   };
 
   const toggleLike = async reel => {
@@ -440,13 +632,17 @@ export default function ReelsExperience() {
     }
   };
 
-  const shareReel = async reel => {
-    const shareData = { title:`${reel.display_name}'s Movora post`, text:reel.caption || "Watch this Movora post", url:reel.video_url || window.location.href };
-    try {
-      if (navigator.share) await navigator.share(shareData);
-      else if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(shareData.url);
-      else setFeedError("Sharing is not available on this device.");
-    } catch (error) { if (error.name !== "AbortError") setFeedError("Unable to share this post."); }
+  const shareReel = reel => setSharingReel(reel);
+
+  const getShareUrl = reel => {
+    const configuredUrl = import.meta.env?.VITE_APP_URL?.trim();
+    const browserUrl = /^https?:$/.test(window.location.protocol) ? window.location.origin : "";
+    const baseUrl = configuredUrl || browserUrl;
+    if (!baseUrl) return "";
+    const link = new URL(baseUrl);
+    link.searchParams.set("reel", reel.id);
+    link.hash = "";
+    return link.toString();
   };
 
   const commentAdded = reelId => setReels(current => current.map(item => item.id === reelId ? { ...item, comment_count:(item.comment_count || 0) + 1 } : item));
@@ -459,7 +655,7 @@ export default function ReelsExperience() {
       {feedError && view === FEED_VIEW && <div className="reels-feed-error" role="alert">{feedError}<button type="button" onClick={() => loadPage(null)}>Retry</button></div>}
       <div ref={loadMoreRef} className="reels-feed-end">{loadingMore ? "Loading more" : cursor ? "" : reels.length ? "You're all caught up" : ""}</div>
     </div>
-    {view === FEED_VIEW && <header className="reels-topbar"><span className="reels-brand">Reels</span><button type="button" className="reels-post-button" onClick={() => { setCameraError(""); setView(CAMERA_VIEW); }}>+ Post</button></header>}
+    {view === FEED_VIEW && <header className="reels-topbar"><div className="reels-topbar-leading"><button type="button" className="reels-back-button" onClick={onExit} aria-label="Back to Home">←</button><span className="reels-brand">Reels</span></div><button type="button" className="reels-post-button" onClick={() => { setCameraError(""); setView(CAMERA_VIEW); }}>+ Post</button></header>}
 
     {view === CAMERA_VIEW && <section className="reels-camera-view" aria-label="Create a post">
       {capturedMedia ? (capturedMedia.type.startsWith("image/")
@@ -486,10 +682,12 @@ export default function ReelsExperience() {
         <label className="details-field"><span>Location <small>Optional</small></span><input value={location} onChange={event => setLocation(event.target.value.slice(0, 100))} placeholder="Add a location" /></label>
         <label className="details-field"><span>Who can see this</span><select value={privacy} onChange={event => setPrivacy(event.target.value)}><option value="public">Everyone</option><option value="friends">Friends</option><option value="private">Only me</option></select></label>
         {publishError && <p className="reel-form-error" role="alert">{publishError}</p>}
-        <button className="reels-publish-button" type="submit" disabled={publishing}>{publishing ? "Sharing..." : "Share post"}</button>
+        {publishing && <div className="reel-upload-progress" role="status"><div className="reel-upload-progress-label"><span>{uploadStage}</span>{uploadStage.startsWith("Uploading") && <span>{uploadProgress}%</span>}</div><div className="reel-upload-progress-track"><span style={{ width:`${uploadStage.startsWith("Uploading") ? uploadProgress : 100}%` }}/></div></div>}
+        <button className="reels-publish-button" type="submit" disabled={publishing}>{publishing ? uploadStage.startsWith("Uploading") ? `Uploading ${uploadProgress}%` : "Preparing post..." : "Share post"}</button>
       </form>
     </section>}
 
     {commentsReel && <CommentsSheet reel={commentsReel} onClose={() => setCommentsReel(null)} onCommentAdded={() => commentAdded(commentsReel.id)}/>}
+    {sharingReel && <ShareSheet reel={sharingReel} shareUrl={getShareUrl(sharingReel)} onClose={() => setSharingReel(null)}/>}
   </main>;
 }
