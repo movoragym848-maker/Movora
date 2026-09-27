@@ -4,7 +4,7 @@ import bcrypt from 'bcryptjs';
 async function addDemoUser() {
   try {
     const email = 'demo@movora.com';
-    const password = process.env.DEMO_PASSWORD || '<DEMO_PASSWORD>';
+    const password = process.env.DEMO_PASSWORD || 'demo123456';
     const phone = process.env.DEMO_PHONE || '9999999999';
     const hashedPassword = await bcrypt.hash(password, 10);
 

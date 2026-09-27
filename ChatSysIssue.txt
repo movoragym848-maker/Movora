@@ -1,0 +1,11 @@
+1. Following followers not updating 
+2. lag issue in follow back and accept button 
+3. unknown posts number in profile at start
+5. chat functionlaity not yet avaiable 
+
+
+5. Add shoot effect with zoom out effect making the note animated bubble smaller and larger  
+6. not yet have option to unfollow and reject 
+7. add option to veiw profile when we send request and friend reuqets logo and dp/profile logo is not macthing
+8. Overlap button while sending reuqest 
+9. double tap on + sign should undo edit profile section 

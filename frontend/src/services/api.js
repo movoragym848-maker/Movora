@@ -121,6 +121,21 @@ export async function request(path, options = {}, retryCount = 0) {
   }
 }
 
+async function requestBlob(path, retryCount = 0) {
+  const session = JSON.parse(localStorage.getItem("rs_session") || localStorage.getItem("rs_gym_owner_session") || "null");
+  const headers = session?.accessToken ? { Authorization:`Bearer ${session.accessToken}` } : {};
+  const res = await fetch(`${API_URL}${path}`, { mode:"cors", cache:"no-store", headers });
+  if (res.status === 401 && retryCount === 0 && session?.refreshToken) {
+    await refreshAccessToken();
+    return requestBlob(path, 1);
+  }
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.message || `Request failed (${res.status})`);
+  }
+  return res.blob();
+}
+
 export const signup = payload => request("/auth/signup", { method:"POST", body:JSON.stringify(payload) });
 export const login = payload => request("/auth/login", { method:"POST", body:JSON.stringify(payload) });
 export const signupGymOwner = payload => request("/gym-owners/signup", { method:"POST", body:JSON.stringify(payload) });
@@ -164,6 +179,17 @@ export const respondToFriendRequest = (requestId, status) => request(`/social/re
 export const toggleSocialFollow = userId => request(`/social/users/${encodeURIComponent(userId)}/follow`, { method:"POST" });
 export const getSocialReels = cursor => request(`/social/reels?limit=8${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`);
 export const createSocialReel = payload => request("/social/reels", { method:"POST", body:JSON.stringify(payload) });
+export const uploadSocialReel = (media, metadata) => request("/social/reels/upload", { method:"POST", body:media, headers:{
+  "Content-Type":media.type,
+  "X-Reel-Caption":encodeURIComponent(metadata.caption || ""),
+  "X-Reel-Workout-Tag":encodeURIComponent(metadata.workoutTag || ""),
+  "X-Reel-Location":encodeURIComponent(metadata.location || ""),
+  "X-Reel-Privacy":metadata.privacy || "public",
+} });
+export const getSocialReelMedia = reelId => requestBlob(`/social/reels/${encodeURIComponent(reelId)}/media`);
+export const toggleSocialReelLike = reelId => request(`/social/reels/${encodeURIComponent(reelId)}/like`, { method:"POST" });
+export const getSocialReelComments = reelId => request(`/social/reels/${encodeURIComponent(reelId)}/comments`);
+export const addSocialReelComment = (reelId, body) => request(`/social/reels/${encodeURIComponent(reelId)}/comments`, { method:"POST", body:JSON.stringify({ body }) });
 export const getSocialConversations = () => request("/social/conversations");
 export const getSocialMessages = conversationId => request(`/social/conversations/${encodeURIComponent(conversationId)}/messages`);
 export const getSocialTyping = conversationId => request(`/social/conversations/${encodeURIComponent(conversationId)}/typing`);

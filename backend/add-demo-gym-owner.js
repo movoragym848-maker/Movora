@@ -4,7 +4,7 @@ import bcrypt from 'bcryptjs';
 async function addDemoGymOwner() {
   try {
     const email = 'gymowner@movora.com';
-    const password = process.env.DEMO_PASSWORD || '<DEMO_PASSWORD>'; // Set via env to avoid committing secrets
+    const password = process.env.DEMO_PASSWORD || 'demo123456'; // Set via env to avoid committing secrets
     const hashedPassword = await bcrypt.hash(password, 10);
 
     // Insert demo gym owner

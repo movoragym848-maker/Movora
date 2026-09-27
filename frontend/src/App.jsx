@@ -10,7 +10,7 @@ import ErrorBoundary from "./components/error/ErrorBoundary";
 import SettingsPagesModal from "./components/common/SettingsPagesModal";
 import * as api from "./services/api";
 import CheckInScreen from "./components/check-in/CheckInScreen";
-import SocialHub from "./components/social/SocialHub";
+import SocialHub, { CallPanel } from "./components/social/SocialHub";
 
 const SOCIAL_ID_PATTERN = /^[a-z0-9._]{3,30}$/;
 
@@ -382,6 +382,7 @@ export default function App({ user, onLogout }) {
 
   return (
     <ErrorBoundary showHomeButton={true} onHome={() => setTab("dashboard")}>
+      <CallPanel incomingOnly onError={() => {}} />
       <div style={{ minHeight:"100dvh", background:C.bg, fontFamily:"'Barlow',sans-serif", paddingBottom:`calc(96px + env(safe-area-inset-bottom, 0px))`, overflowX:"hidden" }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@600;700;800&display=swap');
@@ -1374,7 +1375,7 @@ export default function App({ user, onLogout }) {
                   <div style={{ color:C.dark, fontWeight:800, fontSize:27, fontFamily:"'Barlow Condensed',sans-serif" }}>{profile.displayName}</div>
                   <div style={{ color:C.muted, fontSize:13, marginTop:3 }}>{profile.bio || "Add a short bio about your fitness journey."}</div>
                   <div style={{ display:"flex", gap:18, marginTop:14, flexWrap:"wrap" }}>
-                    {[['Posts', logs.length], ['Followers', profile.followers || 0], ['Following', profile.following || 0]].map(([label, value]) => (
+                    {[['Posts', socialProfile?.posts ?? 0], ['Followers', socialProfile?.followers ?? 0], ['Following', socialProfile?.following ?? 0]].map(([label, value]) => (
                       <div key={label} style={{ minWidth:64 }}>
                         <div style={{ color:C.dark, fontSize:18, fontWeight:800, fontFamily:"'Barlow Condensed',sans-serif" }}>{value}</div>
                         <div style={{ color:C.muted, fontSize:11 }}>{label}</div>

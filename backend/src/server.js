@@ -82,6 +82,26 @@ async function ensureSocialTables() {
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now()
   )`);
+  await query("ALTER TABLE social_reels ALTER COLUMN video_url DROP NOT NULL");
+  await query("ALTER TABLE social_reels ADD COLUMN IF NOT EXISTS media_data bytea");
+  await query("ALTER TABLE social_reels ADD COLUMN IF NOT EXISTS media_type text");
+  await query("ALTER TABLE social_reels ADD COLUMN IF NOT EXISTS workout_tag text NOT NULL DEFAULT ''");
+  await query("ALTER TABLE social_reels ADD COLUMN IF NOT EXISTS location text NOT NULL DEFAULT ''");
+  await query("ALTER TABLE social_reels ADD COLUMN IF NOT EXISTS privacy text NOT NULL DEFAULT 'public'");
+  await query(`CREATE TABLE IF NOT EXISTS social_reel_likes (
+    reel_id uuid NOT NULL REFERENCES social_reels(id) ON DELETE CASCADE,
+    user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (reel_id, user_id)
+  )`);
+  await query(`CREATE TABLE IF NOT EXISTS social_reel_comments (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    reel_id uuid NOT NULL REFERENCES social_reels(id) ON DELETE CASCADE,
+    user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    body text NOT NULL CHECK (char_length(body) BETWEEN 1 AND 500),
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`);
+  await query("CREATE INDEX IF NOT EXISTS idx_social_reel_comments_created ON social_reel_comments(reel_id, created_at ASC)");
   await query(`CREATE TABLE IF NOT EXISTS social_typing_status (
     conversation_id uuid NOT NULL REFERENCES social_conversations(id) ON DELETE CASCADE,
     user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -115,6 +135,7 @@ app.use("/api", routes);
 
 app.use((err, _req, res, _next) => {
   console.error(err);
+  if (err.type === "entity.too.large") return res.status(413).json({ message: "Post media must be 20 MB or smaller." });
   if (err.name === "ZodError") return res.status(400).json({ message: "Invalid request", issues: err.issues });
   res.status(500).json({ message: "Internal server error" });
 });

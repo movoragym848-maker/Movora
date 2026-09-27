@@ -1,8 +1,9 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Capacitor } from "@capacitor/core";
 import { C } from "../../constants/data";
-import { createSocialReel, getCallSignals, getFriendRequests, getSocialConversations, getSocialMessages, getSocialNotes, getSocialProfile, getSocialReels, getSocialTyping, respondToFriendRequest, saveSocialNote, saveSocialProfile, searchSocialProfiles, sendCallSignal, sendFriendRequest, sendSocialMessage, setSocialTyping, toggleSocialFollow } from "../../services/api";
+import { getCallSignals, getFriendRequests, getSocialConversations, getSocialMessages, getSocialNotes, getSocialProfile, getSocialTyping, respondToFriendRequest, saveSocialNote, saveSocialProfile, searchSocialProfiles, sendCallSignal, sendFriendRequest, sendSocialMessage, setSocialTyping, toggleSocialFollow } from "../../services/api";
 import "./SocialHub.css";
+import ReelsExperience from "./ReelsExperience";
 
 const CallAudio = Capacitor.registerPlugin("CallAudio");
 
@@ -59,6 +60,8 @@ export function CallPanel({ person, onError, incomingOnly = false }) {
   const [callError, setCallError] = useState("");
   const [held, setHeld] = useState(false);
   const [remoteHeld, setRemoteHeld] = useState(false);
+  const [muted, setMuted] = useState(false);
+  const [cameraFacing, setCameraFacing] = useState("user");
   const [speaker, setSpeaker] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const ringAudioRef = useRef(null);
@@ -67,12 +70,15 @@ export function CallPanel({ person, onError, incomingOnly = false }) {
   const localStreamRef = useRef(null);
   const remoteVideoRef = useRef(null);
   const remoteAudioRef = useRef(null);
+  const remoteMediaStreamRef = useRef(null);
   const remoteStreamRef = useRef(null);
   const localVideoRef = useRef(null);
+  const videoTransceiverRef = useRef(null);
   const incomingOfferRef = useRef(null);
   const callIdRef = useRef(null);
   const seenSignalsRef = useRef(new Set());
-  const latestSignalRef = useRef(new Date(Date.now() - 30000).toISOString());
+  const latestSignalRef = useRef(new Date(Date.now() - 5000).toISOString());
+  const pollingRef = useRef(false);
   const currentPerson = activePerson || person;
 
   const fail = (error, requestedType = mediaType) => {
@@ -104,12 +110,16 @@ export function CallPanel({ person, onError, incomingOnly = false }) {
     if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
     if (remoteAudioRef.current) remoteAudioRef.current.srcObject = null;
     remoteStreamRef.current = null;
+    remoteMediaStreamRef.current = null;
+    videoTransceiverRef.current = null;
     incomingOfferRef.current = null;
     callIdRef.current = null;
     setActivePerson(null);
     setPhase("idle");
     setHeld(false);
     setRemoteHeld(false);
+    setMuted(false);
+    setCameraFacing("user");
     setElapsed(0);
   };
   phaseRef.current = phase;
@@ -122,8 +132,11 @@ export function CallPanel({ person, onError, incomingOnly = false }) {
     if (!navigator.mediaDevices?.getUserMedia) throw new Error("This device does not support browser calls.");
     if (Capacitor.getPlatform() === "android") await CallAudio.start();
     const peer = new RTCPeerConnection({ iceServers:[{ urls:"stun:stun.l.google.com:19302" }] });
+    if (requestedType === "video") videoTransceiverRef.current = peer.addTransceiver("video", { direction:"recvonly" });
     peer.ontrack = event => {
-      const remoteStream = event.streams[0];
+      const remoteStream = event.streams[0] || remoteMediaStreamRef.current || new MediaStream();
+      if (!event.streams[0]) remoteStream.addTrack(event.track);
+      remoteMediaStreamRef.current = remoteStream;
       remoteStreamRef.current = remoteStream;
       if (remoteVideoRef.current) {
         remoteVideoRef.current.srcObject = remoteStream;
@@ -131,6 +144,8 @@ export function CallPanel({ person, onError, incomingOnly = false }) {
       }
       if (remoteAudioRef.current) {
         remoteAudioRef.current.srcObject = remoteStream;
+        remoteAudioRef.current.muted = false;
+        remoteAudioRef.current.volume = 1;
         remoteAudioRef.current.play().catch(() => {});
       }
     };
@@ -139,7 +154,14 @@ export function CallPanel({ person, onError, incomingOnly = false }) {
       audio: { echoCancellation:true, noiseSuppression:true, autoGainControl:true, channelCount:1 },
       video: requestedType === "video" ? { facingMode:"user" } : false,
     });
-    stream.getTracks().forEach(track => peer.addTrack(track, stream));
+    stream.getAudioTracks().forEach(track => peer.addTrack(track, stream));
+    if (requestedType === "video") {
+      const videoTrack = stream.getVideoTracks()[0];
+      if (videoTrack && videoTransceiverRef.current) {
+        await videoTransceiverRef.current.sender.replaceTrack(videoTrack);
+        videoTransceiverRef.current.direction = "sendrecv";
+      }
+    }
     localStreamRef.current = stream;
     peerRef.current = peer;
     setMediaType(requestedType);
@@ -153,7 +175,12 @@ export function CallPanel({ person, onError, incomingOnly = false }) {
     return peer;
   };
   useEffect(() => {
-    if (remoteStreamRef.current && remoteAudioRef.current) remoteAudioRef.current.srcObject = remoteStreamRef.current;
+    if (remoteStreamRef.current && remoteAudioRef.current) {
+      remoteAudioRef.current.srcObject = remoteStreamRef.current;
+      remoteAudioRef.current.muted = false;
+      remoteAudioRef.current.volume = 1;
+      remoteAudioRef.current.play().catch(() => {});
+    }
     if (remoteStreamRef.current && remoteVideoRef.current) remoteVideoRef.current.srcObject = remoteStreamRef.current;
     if (localStreamRef.current && localVideoRef.current) localVideoRef.current.srcObject = localStreamRef.current;
   }, [phase, mediaType]);
@@ -195,7 +222,16 @@ export function CallPanel({ person, onError, incomingOnly = false }) {
   };
   const toggleHold = () => {
     const nextHeld = !held;
+    peerRef.current?.getSenders().forEach(sender => {
+      if (sender.track) sender.track.enabled = !nextHeld;
+    });
     localStreamRef.current?.getTracks().forEach(track => { track.enabled = !nextHeld; });
+    if (remoteAudioRef.current) remoteAudioRef.current.muted = nextHeld;
+    if (remoteVideoRef.current) {
+      remoteVideoRef.current.muted = nextHeld;
+      if (nextHeld) remoteVideoRef.current.pause();
+      else remoteVideoRef.current.play().catch(() => {});
+    }
     setHeld(nextHeld);
     signal("hangup", { action:nextHeld ? "hold" : "resume" });
   };
@@ -211,27 +247,34 @@ export function CallPanel({ person, onError, incomingOnly = false }) {
     }
     setSpeaker(nextSpeaker);
   };
-  const toggleVideo = async () => {
-    if (mediaType === "video") {
-      localStreamRef.current?.getVideoTracks().forEach(track => track.stop());
-      setMediaType("audio");
-      return;
-    }
+  const toggleMute = () => {
+    const nextMuted = !muted;
+    localStreamRef.current?.getAudioTracks().forEach(track => { track.enabled = !nextMuted; });
+    peerRef.current?.getSenders().forEach(sender => {
+      if (sender.track?.kind === "audio") sender.track.enabled = !nextMuted;
+    });
+    setMuted(nextMuted);
+  };
+  const flipCamera = async () => {
+    if (mediaType !== "video" || !peerRef.current || !localStreamRef.current) return;
+    setCallError("");
     try {
-      const camera = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:"user" } });
-      camera.getVideoTracks().forEach(track => {
-        localStreamRef.current?.addTrack(track);
-        peerRef.current?.addTrack(track, localStreamRef.current);
-      });
-      setMediaType("video");
-      const offer = await peerRef.current.createOffer();
-      await peerRef.current.setLocalDescription(offer);
-      await signal("offer", { ...offer, mediaType:"video", renegotiation:true });
-    } catch (error) { fail(error, "video"); }
+      const nextFacing = cameraFacing === "user" ? "environment" : "user";
+      const camera = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:{ exact:nextFacing } } });
+      const videoTrack = camera.getVideoTracks()[0];
+      if (!videoTrack || !videoTransceiverRef.current || !peerRef.current) throw new Error("Camera did not provide a video track.");
+      await videoTransceiverRef.current.sender.replaceTrack(videoTrack);
+      localStreamRef.current.getVideoTracks().forEach(track => track.stop());
+      localStreamRef.current.addTrack(videoTrack);
+      if (localVideoRef.current) localVideoRef.current.srcObject = localStreamRef.current;
+      setCameraFacing(nextFacing);
+    } catch (error) { fail(error, "camera flip"); }
   };
   useEffect(() => {
     let mounted = true;
     const poll = async () => {
+      if (pollingRef.current) return;
+      pollingRef.current = true;
       try {
         const signals = await getCallSignals(latestSignalRef.current);
         for (const item of signals) {
@@ -247,24 +290,37 @@ export function CallPanel({ person, onError, incomingOnly = false }) {
             incomingOfferRef.current = item.payload;
             setMediaType(item.payload.mediaType || "audio");
             setPhase("incoming");
-          } else if (item.signal_type === "offer" && peerRef.current && item.payload.renegotiation && peerRef.current.signalingState === "stable") {
-            await peerRef.current.setRemoteDescription(item.payload);
-            const answer = await peerRef.current.createAnswer();
-            await peerRef.current.setLocalDescription(answer);
-            await signal("answer", answer);
-            setMediaType(item.payload.mediaType || "video");
           } else if (item.signal_type === "answer" && peerRef.current && peerRef.current.signalingState === "have-local-offer") {
             await peerRef.current.setRemoteDescription(item.payload);
             setPhase("connected");
           } else if (item.signal_type === "candidate" && peerRef.current?.remoteDescription) {
             await peerRef.current.addIceCandidate(item.payload);
           } else if (item.signal_type === "hangup") {
-            if (item.payload?.action === "hold") setRemoteHeld(true);
-            else if (item.payload?.action === "resume") setRemoteHeld(false);
+            if (item.payload?.action === "hold") {
+              setRemoteHeld(true);
+              if (remoteAudioRef.current) remoteAudioRef.current.muted = true;
+              if (remoteVideoRef.current) {
+                remoteVideoRef.current.muted = true;
+                remoteVideoRef.current.pause();
+              }
+            } else if (item.payload?.action === "resume") {
+              setRemoteHeld(false);
+              if (remoteAudioRef.current) remoteAudioRef.current.muted = false;
+              if (remoteVideoRef.current) {
+                remoteVideoRef.current.muted = false;
+                remoteVideoRef.current.play().catch(() => {});
+              }
+            }
             else clearCall();
           }
         }
-      } catch (error) { if (mounted && error?.status !== 404) setCallError(error.message); }
+      } catch (error) {
+        const message = String(error?.message || "").toLowerCase();
+        const transient = error?.isNetworkError || message.includes("network") || message.includes("failed to fetch") || message.includes("timeout") || message.includes("502") || message.includes("503");
+        if (mounted && !transient && error?.status !== 404) setCallError(error.message);
+      } finally {
+        pollingRef.current = false;
+      }
     };
     poll();
     const timer = window.setInterval(poll, 1000);
@@ -273,42 +329,13 @@ export function CallPanel({ person, onError, incomingOnly = false }) {
   if (phase === "idle") return !incomingOnly && currentPerson ? <div className="call-panel"><div className="call-actions"><button type="button" className="call-icon-button" onClick={() => startCall("audio")} aria-label="Start voice call" title="Voice call"><CallIcon type="audio" /></button><button type="button" className="call-icon-button" onClick={() => startCall("video")} aria-label="Start video call" title="Video call"><CallIcon type="video" /></button></div>{callError && <span className="call-error">{callError}</span>}</div> : null;
   const minutes = String(Math.floor(elapsed / 60)).padStart(2, "0");
   const seconds = String(elapsed % 60).padStart(2, "0");
-  return <div className="call-screen" role="dialog" aria-label={`${phase} ${mediaType} call`}>
+  return <div className={`call-screen${mediaType === "video" ? " call-screen-video" : ""}`} role="dialog" aria-label={`${phase} ${mediaType} call`}>
     <div className="call-screen-top"><span className="call-screen-type">{mediaType === "video" ? "Video call" : "Voice call"}</span><span className="call-screen-time">{phase === "connected" ? `${minutes}:${seconds}` : phase === "incoming" ? "Incoming call" : "Calling..."}</span></div>
-    <div className="call-screen-person"><Avatar name={currentPerson?.display_name} src={currentPerson?.avatar_url} size={92}/><h2>{currentPerson?.display_name || "Movora member"}</h2><p>{phase === "incoming" ? `Incoming ${mediaType} call` : phase === "calling" ? "Ringing..." : remoteHeld ? "Friend put the call on hold" : held ? "On hold" : "Connected"}</p></div>
-    {mediaType === "video" && <div className="call-screen-media"><video ref={remoteVideoRef} autoPlay playsInline /><video className="call-screen-local" ref={localVideoRef} autoPlay muted playsInline /></div>}
-    <audio ref={remoteAudioRef} autoPlay playsInline />
+    <div className={`call-screen-person${mediaType === "video" && phase === "connected" ? " video-connected-person" : ""}`}><Avatar name={currentPerson?.display_name} src={currentPerson?.avatar_url} size={92}/><h2>{currentPerson?.display_name || "Movora member"}</h2><p>{phase === "incoming" ? `Incoming ${mediaType} call` : phase === "calling" ? "Ringing..." : remoteHeld ? "Friend put the call on hold" : held ? "On hold" : "Connected"}</p></div>
+    {mediaType === "video" && phase === "connected" && <div className="call-screen-media"><video ref={remoteVideoRef} autoPlay playsInline /><video className="call-screen-local" ref={localVideoRef} autoPlay muted playsInline /></div>}
+    <audio ref={remoteAudioRef} autoPlay playsInline onCanPlay={event => event.currentTarget.play().catch(() => {})} />
     {callError && <div className="call-screen-error">{callError}</div>}
-    {phase === "incoming" ? <div className="incoming-actions"><button type="button" className="call-control accept-control" onClick={acceptCall} aria-label="Accept call">Accept</button><button type="button" className="call-control decline-control" onClick={() => closeCall("decline")} aria-label="Decline call">Decline</button></div> : phase === "calling" ? <button type="button" className="call-control decline-control call-cancel-control" onClick={() => closeCall()} aria-label="Cancel call">Cancel</button> : <div className="call-controls"><button type="button" className={`call-control${held ? " active-control" : ""}`} onClick={toggleHold}>{held ? "Resume" : "Hold"}</button><button type="button" className={`call-control${speaker ? " active-control" : ""}`} onClick={toggleSpeaker}>{speaker ? "Speaker on" : "Speaker off"}</button><button type="button" className="call-control" onClick={toggleVideo}>{mediaType === "video" ? "Voice" : "Video"}</button><button type="button" className="call-control decline-control" onClick={() => closeCall()} aria-label="End call"><CallIcon type="hangup" /></button></div>}
-  </div>;
-}
-
-function Reels({ profile }) {
-  const [reels, setReels] = useState([]);
-  const [cursor, setCursor] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [error, setError] = useState("");
-  const [showPublisher, setShowPublisher] = useState(false);
-  const [videoUrl, setVideoUrl] = useState("");
-  const [caption, setCaption] = useState("");
-  const [publishing, setPublishing] = useState(false);
-  const load = async nextCursor => {
-    nextCursor ? setLoadingMore(true) : setLoading(true);
-    try { const data = await getSocialReels(nextCursor); setReels(current => nextCursor ? [...current, ...data.items] : data.items); setCursor(data.nextCursor); }
-    catch (err) { setError(err.message || "Unable to load reels."); }
-    finally { setLoading(false); setLoadingMore(false); }
-  };
-  useEffect(() => { load(); }, []);
-  const sentinel = useRef(null);
-  useEffect(() => { const observer = new IntersectionObserver(entries => { if (entries[0].isIntersecting && cursor && !loadingMore) load(cursor); }, { rootMargin:"500px" }); if (sentinel.current) observer.observe(sentinel.current); return () => observer.disconnect(); }, [cursor, loadingMore]);
-  if (loading) return <div style={{ padding:50, textAlign:"center", color:C.muted }}>Loading reels...</div>;
-  return <div style={{ display:"grid", gap:16 }}>
-    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"end", gap:10 }}><div><h1 style={{ margin:0, color:C.dark, fontFamily:"'Barlow Condensed',sans-serif", fontSize:28 }}>Reels</h1><p style={{ margin:"4px 0 0", color:C.muted, fontSize:14 }}>Train. Share. Move together.</p></div><button type="button" onClick={() => setShowPublisher(current => !current)} style={{ border:0, borderRadius:9, background:C.primary, color:"#fff", padding:"9px 12px", fontWeight:700, cursor:"pointer" }}>+ Post</button></div>
-    {showPublisher && <form onSubmit={async event => { event.preventDefault(); setPublishing(true); setError(""); try { await createSocialReel({ videoUrl, caption }); setVideoUrl(""); setCaption(""); setShowPublisher(false); await load(); } catch (err) { setError(err.message || "Unable to publish reel."); } finally { setPublishing(false); } }} style={{ display:"grid", gap:8, background:C.card, border:`1px solid ${C.border}`, borderRadius:12, padding:12 }}><input required type="url" value={videoUrl} onChange={e => setVideoUrl(e.target.value)} placeholder="Hosted video URL (https://...)" style={{ padding:10, border:`1px solid ${C.border}`, borderRadius:8, background:C.surface, color:C.dark, font:"inherit" }}/><input maxLength={220} value={caption} onChange={e => setCaption(e.target.value)} placeholder="Caption" style={{ padding:10, border:`1px solid ${C.border}`, borderRadius:8, background:C.surface, color:C.dark, font:"inherit" }}/><button type="submit" disabled={publishing} style={{ border:0, borderRadius:8, background:C.dark, color:"#fff", padding:10, fontWeight:700, cursor:"pointer" }}>{publishing ? "Publishing..." : "Publish Reel"}</button></form>}
-    {error && <div role="alert" style={{ padding:12, borderRadius:8, background:"#FEF2F2", color:"#991B1B" }}>{error}</div>}
-    {reels.length === 0 ? <div style={{ padding:40, textAlign:"center", background:C.card, border:`1px solid ${C.border}`, borderRadius:14, color:C.muted }}>No reels have been published yet.</div> : reels.map(reel => <article key={reel.id} style={{ background:"#111827", borderRadius:16, overflow:"hidden", color:"#fff" }}><video src={reel.video_url} poster={reel.thumbnail_url || undefined} controls playsInline preload="metadata" style={{ display:"block", width:"100%", maxHeight:"72vh", aspectRatio:"9 / 16", objectFit:"cover", background:"#000" }} /><div style={{ padding:14 }}><div style={{ display:"flex", alignItems:"center", gap:9 }}><Avatar name={reel.display_name} src={reel.avatar_url} size={34}/><strong>{reel.display_name}</strong><span style={{ color:"#CBD5E1", fontSize:12 }}>@{reel.username}</span></div>{reel.caption && <p style={{ margin:"10px 0 0", color:"#E5E7EB", fontSize:14 }}>{reel.caption}</p>}</div></article>)}
-    <div ref={sentinel} style={{ minHeight:30, textAlign:"center", color:C.muted, fontSize:12 }}>{loadingMore ? "Loading more..." : reels.length && !cursor ? "You are all caught up." : ""}</div>
+    {phase === "incoming" ? <div className="incoming-actions"><button type="button" className="call-control accept-control" onClick={acceptCall} aria-label="Accept call">Accept</button><button type="button" className="call-control decline-control" onClick={() => closeCall("decline")} aria-label="Decline call">Decline</button></div> : phase === "calling" ? <button type="button" className="call-control decline-control call-cancel-control" onClick={() => closeCall()} aria-label="Cancel call">Cancel</button> : <div className="call-controls"><button type="button" className={`call-control${held ? " active-control" : ""}`} onClick={toggleHold}>{held ? "Resume" : "Hold"}</button><button type="button" className={`call-control${speaker ? " active-control" : ""}`} onClick={toggleSpeaker}>{speaker ? "Speaker on" : "Speaker off"}</button><button type="button" className={`call-control${muted ? " active-control" : ""}`} onClick={toggleMute}>{muted ? "Unmute" : "Mute"}</button>{mediaType === "video" && <button type="button" className="call-control" onClick={flipCamera}>Flip camera</button>}<button type="button" className="call-control decline-control" onClick={() => closeCall()} aria-label="End call"><CallIcon type="hangup" /></button></div>}
   </div>;
 }
 
@@ -326,6 +353,7 @@ function Messages({ profile }) {
   const [requestAction, setRequestAction] = useState("");
   const [note, setNote] = useState("");
   const [friendNotes, setFriendNotes] = useState([]);
+  const [selectedNote, setSelectedNote] = useState(null);
   const [noteDraft, setNoteDraft] = useState("");
   const [noteOpen, setNoteOpen] = useState(false);
   const noteInputRef = useRef(null);
@@ -512,9 +540,10 @@ function Messages({ profile }) {
     <div className="messages-search"><div className="search-field"><span aria-hidden="true">⌕</span><input id="people-search" aria-label="Search by username or name" value={query} onChange={e => setQuery(e.target.value)} placeholder="Search by @username or name" /></div></div>
     <div className="discover-row" aria-label="Discover people">
       <button type="button" className={`discover-item note-trigger${noteOpen ? " is-hidden" : ""}`} onClick={openNote} aria-label={note ? `Edit your note: ${note}` : "Write your note"}><div className="note-cloud-wrap">{note && <span className="note-cloud">{note}</span>}<div className="discover-avatar discover-note"><span>✦</span></div></div><strong>Your note</strong></button>
-      {friendNotes.map(friendNote => <div className="discover-item" key={friendNote.user_id}><div className="note-cloud-wrap"><span className="note-cloud friend-note-cloud">{friendNote.text}</span><Avatar name={friendNote.display_name} src={friendNote.avatar_url} size={62}/></div><strong>{friendNote.display_name}</strong></div>)}
+      {friendNotes.map(friendNote => <button type="button" className="discover-item friend-note-item" key={friendNote.user_id} onClick={() => setSelectedNote(friendNote)} aria-label={`Read ${friendNote.display_name}'s note`}><div className="note-cloud-wrap"><span className="note-cloud friend-note-cloud">{friendNote.text}</span><Avatar name={friendNote.display_name} src={friendNote.avatar_url} size={62}/></div><strong>{friendNote.display_name}</strong></button>)}
     </div>
     {noteOpen && <div className="note-overlay"><div className="note-composer" role="dialog" aria-label="Write your note"><div className="discover-avatar discover-note"><span>✦</span></div><input ref={noteInputRef} className="note-input" value={noteDraft} onChange={event => setNoteDraft(event.target.value.slice(0, 80))} maxLength={80} placeholder="What are you up to?" aria-label="Your note" /></div></div>}
+    {selectedNote && <div className="note-overlay" onClick={() => setSelectedNote(null)}><div className="note-viewer" role="dialog" aria-label={`${selectedNote.display_name}'s note`} onClick={event => event.stopPropagation()}><Avatar name={selectedNote.display_name} src={selectedNote.avatar_url} size={76}/><strong>{selectedNote.display_name}</strong><p>{selectedNote.text}</p><button type="button" onClick={() => setSelectedNote(null)}>Close</button></div></div>}
     {error && <div role="alert" className="messages-error">{error}</div>}
     {results.length > 0 && <div className="people-results"><div className="section-label">People</div>{results.map(user => <div className="person-result" key={user.user_id}><Avatar name={user.display_name} src={user.avatar_url} size={46}/><div className="person-copy"><strong>{user.display_name}</strong><span>@{user.username} · {user.followers} followers</span></div>{user.request_status === "accepted" ? <button type="button" className="message-button" onClick={() => chooseUser(user)}>Message</button> : user.request_status === "outgoing_pending" ? <span className="request-pending">Requested</span> : user.request_status === "incoming_pending" ? <button type="button" className="request-accept" onClick={() => refreshRequests().then(() => setRequestsOpen(true))}>Review request</button> : <button type="button" className="message-button" onClick={() => requestUser(user)}>Add friend</button>}</div>)}</div>}
     <div className={`inbox-layout${selected ? " has-selection" : ""}`}>
@@ -530,5 +559,5 @@ export default function SocialHub({ mode, user }) {
   useEffect(() => { getSocialProfile().then(setProfile).catch(() => setProfile(null)).finally(() => setLoading(false)); }, []);
   if (loading) return <div style={{ padding:50, textAlign:"center", color:C.muted }}>Loading Movora social...</div>;
   if (!profile) return <AccountSetup initial={{ ...emptyProfile, displayName:user.name }} onSaved={setProfile}/>;
-  return mode === "reels" ? <Reels profile={profile}/> : <Messages profile={profile}/>;
+  return mode === "reels" ? <ReelsExperience/> : <Messages profile={profile}/>;
 }

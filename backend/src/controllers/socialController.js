@@ -8,9 +8,12 @@ const profileSchema = z.object({
   avatarUrl: z.string().url().max(2000).nullable().optional(),
 });
 const messageSchema = z.object({ body: z.string().trim().min(1).max(2000) });
-const reelSchema = z.object({ videoUrl: z.string().url().max(2000), thumbnailUrl: z.string().url().max(2000).nullable().optional(), caption: z.string().max(220).optional().default("") });
+const reelSchema = z.object({ videoUrl: z.string().url().max(2000), thumbnailUrl: z.string().url().max(2000).nullable().optional(), caption: z.string().max(220).optional().default(""), workoutTag:z.string().max(40).optional().default(""), location:z.string().max(100).optional().default(""), privacy:z.enum(["public", "friends", "private"]).optional().default("public") });
 const callSignalSchema = z.object({ type: z.enum(["offer", "answer", "candidate", "hangup"]), payload: z.record(z.any()).default({}) });
 const noteSchema = z.object({ text: z.string().trim().min(1).max(80) });
+const reelCommentSchema = z.object({ body:z.string().trim().min(1).max(500) });
+const reelMediaTypes = new Set(["image/jpeg", "image/png", "image/webp", "video/mp4", "video/webm", "video/quicktime", "video/3gpp"]);
+const maxReelMediaBytes = 20 * 1024 * 1024;
 
 function authUser(req) { return req.user?.role === "gym_owner" ? null : req.user?.sub; }
 
@@ -185,14 +188,23 @@ export async function listReels(req, res, next) {
     if (!userId) return res.status(403).json({ message: "Social features are available for member accounts." });
     const limit = Math.min(Math.max(Number(req.query.limit) || 8, 1), 20);
     const cursor = req.query.cursor ? new Date(req.query.cursor) : null;
-    const params = cursor && !Number.isNaN(cursor.getTime()) ? [cursor.toISOString(), limit] : [limit];
-    const where = params.length === 2 ? "WHERE r.created_at < $1" : "";
-    const limitParam = params.length === 2 ? "$2" : "$1";
+    const params = [userId];
+    const cursorFilter = cursor && !Number.isNaN(cursor.getTime()) ? `AND r.created_at < $${params.push(cursor.toISOString())}` : "";
+    params.push(limit);
+    const limitParam = `$${params.length}`;
     const { rows } = await query(`
       SELECT r.id, r.video_url, r.thumbnail_url, r.caption, r.created_at,
+        r.media_type, r.workout_tag, r.location, r.privacy,
+        (SELECT count(*)::int FROM social_reel_likes l WHERE l.reel_id = r.id) AS like_count,
+        EXISTS (SELECT 1 FROM social_reel_likes l WHERE l.reel_id = r.id AND l.user_id = $1) AS liked,
+        (SELECT count(*)::int FROM social_reel_comments c WHERE c.reel_id = r.id) AS comment_count,
         p.user_id, p.username, p.display_name, p.avatar_url
       FROM social_reels r JOIN social_profiles p ON p.user_id = r.creator_id
-      ${where} ORDER BY r.created_at DESC, r.id DESC LIMIT ${limitParam}`, params);
+      WHERE (r.privacy = 'public' OR r.creator_id = $1 OR (r.privacy = 'friends' AND EXISTS (
+        SELECT 1 FROM social_friend_requests f WHERE f.status = 'accepted' AND
+          ((f.requester_id = $1 AND f.recipient_id = r.creator_id) OR (f.requester_id = r.creator_id AND f.recipient_id = $1))
+      ))) ${cursorFilter}
+      ORDER BY r.created_at DESC, r.id DESC LIMIT ${limitParam}`, params);
     res.json({ items: rows, nextCursor: rows.length === limit ? rows[rows.length - 1].created_at : null });
   } catch (err) { next(err); }
 }
@@ -204,10 +216,106 @@ export async function createReel(req, res, next) {
     const profile = await query("SELECT 1 FROM social_profiles WHERE user_id = $1", [userId]);
     if (!profile.rowCount) return res.status(403).json({ message: "Create your social account first." });
     const input = reelSchema.parse(req.body);
-    const { rows } = await query(`INSERT INTO social_reels (creator_id, video_url, thumbnail_url, caption) VALUES ($1, $2, $3, $4) RETURNING *`, [userId, input.videoUrl, input.thumbnailUrl || null, input.caption]);
+    const { rows } = await query(`INSERT INTO social_reels (creator_id, video_url, thumbnail_url, caption, workout_tag, location, privacy) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`, [userId, input.videoUrl, input.thumbnailUrl || null, input.caption, input.workoutTag, input.location, input.privacy]);
     res.status(201).json(rows[0]);
   } catch (err) {
     if (err instanceof z.ZodError) return res.status(400).json({ message: err.issues[0]?.message || "Invalid reel." });
+    next(err);
+  }
+}
+
+async function findVisibleReel(reelId, userId) {
+  const { rows } = await query(`SELECT r.id, r.privacy FROM social_reels r WHERE r.id = $1 AND
+    (r.privacy = 'public' OR r.creator_id = $2 OR (r.privacy = 'friends' AND EXISTS (
+      SELECT 1 FROM social_friend_requests f WHERE f.status = 'accepted' AND
+        ((f.requester_id = $2 AND f.recipient_id = r.creator_id) OR (f.requester_id = r.creator_id AND f.recipient_id = $2))
+    )))`, [reelId, userId]);
+  return rows[0] || null;
+}
+
+export async function createUploadedReel(req, res, next) {
+  try {
+    const userId = authUser(req);
+    if (!userId) return res.status(403).json({ message: "Social features are available for member accounts." });
+    const profile = await query("SELECT 1 FROM social_profiles WHERE user_id = $1", [userId]);
+    if (!profile.rowCount) return res.status(403).json({ message: "Create your social account first." });
+    const mediaType = String(req.headers["content-type"] || "").split(";")[0].trim().toLowerCase();
+    if (!reelMediaTypes.has(mediaType)) return res.status(415).json({ message: "Use a JPEG, PNG, WebP, MP4, WebM, MOV, or 3GP file." });
+    if (!Buffer.isBuffer(req.body) || req.body.length === 0) return res.status(400).json({ message: "Post media is required." });
+    if (req.body.length > maxReelMediaBytes) return res.status(413).json({ message: "Post media must be 20 MB or smaller." });
+    const input = z.object({
+      caption:z.string().max(220).optional().default(""),
+      workoutTag:z.string().max(40).optional().default(""),
+      location:z.string().max(100).optional().default(""),
+      privacy:z.enum(["public", "friends", "private"]).optional().default("public"),
+    }).parse({
+      caption:decodeURIComponent(req.headers["x-reel-caption"] || ""),
+      workoutTag:decodeURIComponent(req.headers["x-reel-workout-tag"] || ""),
+      location:decodeURIComponent(req.headers["x-reel-location"] || ""),
+      privacy:req.headers["x-reel-privacy"] || "public",
+    });
+    const { rows } = await query(`INSERT INTO social_reels
+      (creator_id, video_url, caption, media_data, media_type, workout_tag, location, privacy)
+      VALUES ($1, NULL, $2, $3, $4, $5, $6, $7) RETURNING id, created_at`,
+    [userId, input.caption, req.body, mediaType, input.workoutTag, input.location, input.privacy]);
+    res.status(201).json(rows[0]);
+  } catch (err) {
+    if (err instanceof z.ZodError || err instanceof URIError) return res.status(400).json({ message: err.issues?.[0]?.message || "Invalid post details." });
+    next(err);
+  }
+}
+
+export async function getSocialReelMedia(req, res, next) {
+  try {
+    const userId = authUser(req);
+    if (!userId) return res.status(403).json({ message: "Social features are available for member accounts." });
+    if (!await findVisibleReel(req.params.reelId, userId)) return res.status(404).json({ message: "Post not found." });
+    const { rows } = await query("SELECT media_data, media_type FROM social_reels WHERE id = $1", [req.params.reelId]);
+    if (!rows[0]?.media_data) return res.status(404).json({ message: "Post media not found." });
+    res.set("Content-Type", rows[0].media_type);
+    res.set("Content-Length", String(rows[0].media_data.length));
+    res.set("Cache-Control", "private, max-age=3600");
+    res.send(rows[0].media_data);
+  } catch (err) { next(err); }
+}
+
+export async function toggleReelLike(req, res, next) {
+  try {
+    const userId = authUser(req);
+    if (!userId) return res.status(403).json({ message: "Social features are available for member accounts." });
+    if (!await findVisibleReel(req.params.reelId, userId)) return res.status(404).json({ message: "Post not found." });
+    const removed = await query("DELETE FROM social_reel_likes WHERE reel_id = $1 AND user_id = $2 RETURNING reel_id", [req.params.reelId, userId]);
+    const liked = !removed.rowCount;
+    if (liked) await query("INSERT INTO social_reel_likes (reel_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING", [req.params.reelId, userId]);
+    const { rows } = await query("SELECT count(*)::int AS like_count FROM social_reel_likes WHERE reel_id = $1", [req.params.reelId]);
+    res.json({ liked, like_count:rows[0].like_count });
+  } catch (err) { next(err); }
+}
+
+export async function getSocialReelComments(req, res, next) {
+  try {
+    const userId = authUser(req);
+    if (!userId) return res.status(403).json({ message: "Social features are available for member accounts." });
+    if (!await findVisibleReel(req.params.reelId, userId)) return res.status(404).json({ message: "Post not found." });
+    const { rows } = await query(`SELECT c.id, c.body, c.created_at, p.user_id, p.display_name
+      FROM social_reel_comments c JOIN social_profiles p ON p.user_id = c.user_id
+      WHERE c.reel_id = $1 ORDER BY c.created_at ASC LIMIT 100`, [req.params.reelId]);
+    res.json(rows);
+  } catch (err) { next(err); }
+}
+
+export async function addSocialReelComment(req, res, next) {
+  try {
+    const userId = authUser(req);
+    if (!userId) return res.status(403).json({ message: "Social features are available for member accounts." });
+    if (!await findVisibleReel(req.params.reelId, userId)) return res.status(404).json({ message: "Post not found." });
+    const input = reelCommentSchema.parse(req.body);
+    const { rows } = await query(`INSERT INTO social_reel_comments (reel_id, user_id, body) VALUES ($1, $2, $3)
+      RETURNING id, body, created_at`, [req.params.reelId, userId, input.body]);
+    const { rows:profileRows } = await query("SELECT user_id, display_name FROM social_profiles WHERE user_id = $1", [userId]);
+    res.status(201).json({ ...rows[0], ...profileRows[0] });
+  } catch (err) {
+    if (err instanceof z.ZodError) return res.status(400).json({ message: "Comments must contain 1-500 characters." });
     next(err);
   }
 }
