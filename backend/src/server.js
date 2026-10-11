@@ -88,6 +88,8 @@ async function ensureSocialTables() {
   await query("ALTER TABLE social_reels ADD COLUMN IF NOT EXISTS workout_tag text NOT NULL DEFAULT ''");
   await query("ALTER TABLE social_reels ADD COLUMN IF NOT EXISTS location text NOT NULL DEFAULT ''");
   await query("ALTER TABLE social_reels ADD COLUMN IF NOT EXISTS privacy text NOT NULL DEFAULT 'public'");
+  await query("ALTER TABLE social_reels ADD COLUMN IF NOT EXISTS video_hls_url text");
+  await query("ALTER TABLE social_reels ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'ready'");
   await query(`CREATE TABLE IF NOT EXISTS social_reel_likes (
     reel_id uuid NOT NULL REFERENCES social_reels(id) ON DELETE CASCADE,
     user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
