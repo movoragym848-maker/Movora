@@ -23,6 +23,11 @@ export const maxReelMediaBytes = Number.isSafeInteger(configuredReelMediaBytes) 
 
 function authUser(req) { return req.user?.role === "gym_owner" ? null : req.user?.sub; }
 
+export function getSocialReelUploadLimits(req, res) {
+  if (!authUser(req)) return res.status(403).json({ message:"Social features are available for member accounts." });
+  res.json({ maxVideoBytes:maxReelMediaBytes });
+}
+
 export async function getSocialNotes(req, res, next) {
   try {
     const userId = authUser(req);

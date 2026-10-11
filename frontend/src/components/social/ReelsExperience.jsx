@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { DotLottieReact } from "@lottiefiles/dotlottie-react";
-import { addSocialReelComment, createSocialReelFromUpload, getSocialConversations, getSocialReel, getSocialReelComments, getSocialReelMedia, getSocialReelUploadUrl, getSocialReels, recordSocialReelEvent, resolveApiUrl, sendSocialMessage, setSocialReelCommentPinned, toggleSocialReelLike, uploadReelObject, uploadSocialReel } from "../../services/api";
+import { addSocialReelComment, createSocialReelFromUpload, getSocialConversations, getSocialReel, getSocialReelComments, getSocialReelMedia, getSocialReelUploadUrl, getSocialReelUploadLimits, getSocialReels, recordSocialReelEvent, resolveApiUrl, sendSocialMessage, setSocialReelCommentPinned, toggleSocialReelLike, uploadReelObject, uploadSocialReel } from "../../services/api";
 const likeAnimationUrl = `${import.meta.env.BASE_URL}like.lottie`;
 import "./ReelsExperience.css";
 
@@ -8,6 +8,8 @@ const FEED_VIEW = "FEED_VIEW";
 const CAMERA_VIEW = "CAMERA_VIEW";
 const POST_DETAILS_VIEW = "POST_DETAILS_VIEW";
 const MAX_RECORDING_SECONDS = 30;
+const DEFAULT_MAX_VIDEO_BYTES = 150 * 1024 * 1024;
+const RECORDING_SIZE_HEADROOM_BYTES = 1024 * 1024;
 const filters = [
   { id: "original", label: "Original", css: "none" },
   { id: "warm", label: "Warm", css: "sepia(.22) saturate(1.2)" },
@@ -362,6 +364,9 @@ export default function ReelsExperience({ onExit }) {
   const [previewUrl, setPreviewUrl] = useState("");
   const [recording, setRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const [recordedBytes, setRecordedBytes] = useState(0);
+  const [maxVideoBytes, setMaxVideoBytes] = useState(DEFAULT_MAX_VIDEO_BYTES);
+  const [uploadLimitReady, setUploadLimitReady] = useState(false);
   const [caption, setCaption] = useState("");
   const [workoutTag, setWorkoutTag] = useState("");
   const [location, setLocation] = useState("");
@@ -376,6 +381,7 @@ export default function ReelsExperience({ onExit }) {
   const cameraStreamRef = useRef(null);
   const recorderRef = useRef(null);
   const recorderChunksRef = useRef([]);
+  const recordedBytesRef = useRef(0);
   const holdTimerRef = useRef(null);
   const maxRecordTimerRef = useRef(null);
   const durationTimerRef = useRef(null);
@@ -386,6 +392,21 @@ export default function ReelsExperience({ onExit }) {
   const previewUrlRef = useRef("");
 
   const currentFilter = filters.find(filter => filter.id === selectedFilter) || filters[0];
+  const recordingProgress = Math.min(100, maxVideoBytes > 0 ? recordedBytes / maxVideoBytes * 100 : 0);
+  const uploadLimitMegabytes = Math.round(maxVideoBytes / (1024 * 1024));
+
+  useEffect(() => {
+    if (view !== CAMERA_VIEW) return undefined;
+    let active = true;
+    setUploadLimitReady(false);
+    getSocialReelUploadLimits()
+      .then(limits => {
+        if (active && Number.isSafeInteger(limits.maxVideoBytes) && limits.maxVideoBytes > 0) setMaxVideoBytes(limits.maxVideoBytes);
+      })
+      .catch(() => {})
+      .finally(() => { if (active) setUploadLimitReady(true); });
+    return () => { active = false; };
+  }, [view]);
 
   const loadPage = async nextCursor => {
     if (loadingRef.current) return;
@@ -588,10 +609,28 @@ export default function ReelsExperience({ onExit }) {
         ? new MediaRecorder(recordingStream, { mimeType, videoBitsPerSecond:1_500_000, audioBitsPerSecond:128_000 })
         : new MediaRecorder(recordingStream, { videoBitsPerSecond:1_500_000 });
       recorderChunksRef.current = [];
-      recorder.ondataavailable = event => { if (event.data?.size) recorderChunksRef.current.push(event.data); };
+      recordedBytesRef.current = 0;
+      setRecordedBytes(0);
+      const recordingByteLimit = Math.max(1, maxVideoBytes - RECORDING_SIZE_HEADROOM_BYTES);
+      recorder.ondataavailable = event => {
+        if (!event.data?.size) return;
+        recorderChunksRef.current.push(event.data);
+        recordedBytesRef.current += event.data.size;
+        setRecordedBytes(recordedBytesRef.current);
+        if (recordedBytesRef.current >= recordingByteLimit && recorder.state === "recording") {
+          setCameraError(`Reached the ${uploadLimitMegabytes} MB upload limit. Recording stopped.`);
+          recorder.stop();
+        }
+      };
       recorder.onstop = () => {
         const blob = new Blob(recorderChunksRef.current, { type:recorder.mimeType || "video/webm" });
         recorderChunksRef.current = [];
+        recordedBytesRef.current = blob.size;
+        setRecordedBytes(blob.size);
+        if (durationTimerRef.current) window.clearInterval(durationTimerRef.current);
+        if (maxRecordTimerRef.current) window.clearTimeout(maxRecordTimerRef.current);
+        durationTimerRef.current = null;
+        maxRecordTimerRef.current = null;
         recordingCleanupRef.current?.();
         recordingCleanupRef.current = null;
         if (blob.size) setCapture(blob);
@@ -643,6 +682,10 @@ export default function ReelsExperience({ onExit }) {
       setCameraError("Choose a photo or video file.");
       return;
     }
+    if (file.type.startsWith("video/") && file.size > maxVideoBytes) {
+      setCameraError(`Choose a video under ${uploadLimitMegabytes} MB.`);
+      return;
+    }
     setCapture(file);
   };
 
@@ -651,6 +694,8 @@ export default function ReelsExperience({ onExit }) {
     previewUrlRef.current = "";
     setPreviewUrl("");
     setCapturedMedia(null);
+    recordedBytesRef.current = 0;
+    setRecordedBytes(0);
     setCameraError("");
   };
 
@@ -742,7 +787,19 @@ export default function ReelsExperience({ onExit }) {
       {cameraError && <p className="camera-error" role="alert">{cameraError}</p>}
       {!capturedMedia && <div className="camera-controls">
         <div className="camera-filters" role="group" aria-label="Camera filters">{filters.map(filter => <button type="button" key={filter.id} className={selectedFilter === filter.id ? "selected" : ""} onClick={() => setSelectedFilter(filter.id)}><span className={`filter-swatch filter-${filter.id}`} />{filter.label}</button>)}</div>
-        <div className="camera-shutter-row"><button type="button" className="camera-library" onClick={() => document.getElementById("reel-media-picker")?.click()} aria-label="Choose photos or videos from your gallery"><span className="camera-library-icon" aria-hidden="true">▧</span><span>Gallery</span></button><button type="button" className={`camera-shutter${recording ? " is-recording" : ""}`} disabled={!cameraReady} onPointerDown={onShutterDown} onPointerUp={onShutterUp} onPointerCancel={onShutterUp} onContextMenu={event => event.preventDefault()} aria-label="Tap to take a photo or hold to record video"><span /></button><span className="camera-hint">Tap photo · Hold video</span></div>
+        <div className="camera-shutter-row">
+          <button type="button" className="camera-library" onClick={() => document.getElementById("reel-media-picker")?.click()} aria-label="Choose photos or videos from your gallery"><span className="camera-library-icon" aria-hidden="true">▧</span><span>Gallery</span></button>
+          <div className={`camera-shutter-wrap${recording ? " is-recording" : ""}`}>
+            <svg className="camera-shutter-progress" viewBox="0 0 100 100" role="progressbar" aria-label="Video file size limit" aria-valuemin="0" aria-valuemax="100" aria-valuenow={Math.round(recordingProgress)}>
+              <circle className="camera-shutter-progress-track" cx="50" cy="50" r="44" />
+              <circle className="camera-shutter-progress-value" cx="50" cy="50" r="44" style={{ strokeDashoffset:`${276.46 * (1 - recordingProgress / 100)}` }} />
+            </svg>
+            <button type="button" className={`camera-shutter${recording ? " is-recording" : ""}`} disabled={!cameraReady || !uploadLimitReady} onPointerDown={onShutterDown} onPointerUp={onShutterUp} onPointerCancel={onShutterUp} onContextMenu={event => event.preventDefault()} aria-label={recording ? "Release to stop recording" : `Tap for photo or hold to record video, maximum ${uploadLimitMegabytes} megabytes`}>
+              <span />
+            </button>
+          </div>
+          <span className="camera-hint">{recording ? `${(recordedBytes / (1024 * 1024)).toFixed(1)} / ${uploadLimitMegabytes} MB` : `Tap photo · Hold video · Max ${uploadLimitMegabytes} MB`}</span>
+        </div>
         <input id="reel-media-picker" className="camera-file-input" type="file" accept="image/*,video/*" onChange={chooseLibraryMedia} />
       </div>}
       {capturedMedia && <button type="button" className="camera-retake" onClick={retake}>Retake</button>}

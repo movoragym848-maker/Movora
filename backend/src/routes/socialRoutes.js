@@ -1,6 +1,6 @@
 import express, { Router } from "express";
 import { requireAuth } from "../middleware/auth.js";
-import { addSocialReelComment, createReel, createUploadedReel, getSocialNotes, getSocialProfile, getSocialReel, getSocialReelComments, getSocialReelMedia, getTypingStatus, listCallSignals, listConversations, listFriendRequests, listMessages, listReels, maxReelMediaBytes, pinSocialReelComment, respondToFriendRequest, saveSocialNote, saveSocialProfile, searchSocialProfiles, sendCallSignal, sendFriendRequest, sendMessage, setTypingStatus, toggleFollow, toggleReelLike } from "../controllers/socialController.js";
+import { addSocialReelComment, createReel, createUploadedReel, getSocialNotes, getSocialProfile, getSocialReel, getSocialReelComments, getSocialReelMedia, getSocialReelUploadLimits, getTypingStatus, listCallSignals, listConversations, listFriendRequests, listMessages, listReels, maxReelMediaBytes, pinSocialReelComment, respondToFriendRequest, saveSocialNote, saveSocialProfile, searchSocialProfiles, sendCallSignal, sendFriendRequest, sendMessage, setTypingStatus, toggleFollow, toggleReelLike } from "../controllers/socialController.js";
 import { deleteMyReel, getMyReelAnalytics, listMyReels, recordMyReelEvent, toggleMyReelSave, updateMyReelPrivacy } from "../controllers/reelAnalyticsController.js";
 
 export const socialRoutes = Router();
@@ -18,6 +18,7 @@ socialRoutes.get("/my/reels", listMyReels);
 socialRoutes.get("/my/reels/:reelId/analytics", getMyReelAnalytics);
 socialRoutes.put("/my/reels/:reelId/privacy", updateMyReelPrivacy);
 socialRoutes.delete("/my/reels/:reelId", deleteMyReel);
+socialRoutes.get("/reels/upload-limits", getSocialReelUploadLimits);
 socialRoutes.get("/reels", listReels);
 socialRoutes.post("/reels", createReel);
 socialRoutes.post("/reels/upload", express.raw({ type:["image/jpeg", "image/png", "image/webp", "video/mp4", "video/webm", "video/quicktime", "video/3gpp"], limit:maxReelMediaBytes }), createUploadedReel);
