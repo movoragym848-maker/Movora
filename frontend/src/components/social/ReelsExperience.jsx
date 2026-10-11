@@ -226,7 +226,7 @@ function ShareSheet({ reel, shareUrl, onClose }) {
   }, []);
 
   const shareOnWhatsApp = () => {
-    const message = [reel.caption, shareUrl].filter(Boolean).join("\n");
+    const message = ["A reel from Movora", reel.caption, shareUrl].filter(Boolean).join("\n");
     window.open(`https://wa.me/?text=${encodeURIComponent(message)}`, "_blank", "noopener,noreferrer");
   };
 
@@ -260,7 +260,7 @@ function ShareSheet({ reel, shareUrl, onClose }) {
         <button type="button" onClick={shareOnWhatsApp} disabled={!canShareLink}><span className="share-action-icon whatsapp-share-icon">◉</span><span>WhatsApp</span></button>
         <button type="button" onClick={copyLink} disabled={!canShareLink}><span className="share-action-icon">↗</span><span>Copy link</span></button>
       </div>
-      {!canShareLink && <p className="share-needs-url">Set VITE_APP_URL to your public web app URL to share post links from the Android app.</p>}
+      {!canShareLink && <p className="share-needs-url">Set VITE_APP_URL to Movora's public website URL. Localhost links cannot be shared.</p>}
       {feedback && <p className="share-feedback" role="status">{feedback}</p>}
       <div className="share-friends-heading"><strong>Send to a friend</strong><span>{friends.length}</span></div>
       <div className="share-friends-list">
@@ -639,7 +639,10 @@ export default function ReelsExperience({ onExit }) {
     const browserUrl = /^https?:$/.test(window.location.protocol) ? window.location.origin : "";
     const baseUrl = configuredUrl || browserUrl;
     if (!baseUrl) return "";
-    const link = new URL(baseUrl);
+    let link;
+    try { link = new URL(baseUrl); }
+    catch { return ""; }
+    if (!/^https?:$/.test(link.protocol) || ["localhost", "127.0.0.1", "0.0.0.0", "::1", "[::1]"].includes(link.hostname)) return "";
     link.searchParams.set("reel", reel.id);
     link.hash = "";
     return link.toString();
