@@ -1,4 +1,9 @@
 const API_URL = (import.meta.env?.VITE_API_URL || "https://sincere-transformation-production-b923.up.railway.app/api").trim().replace(/\/+$/, "");
+export const resolveApiUrl = path => {
+  if (!path || /^https?:\/\//i.test(path)) return path;
+  const apiPath = path.startsWith("/api/") ? path.slice(4) : path.startsWith("/") ? path : `/${path}`;
+  return `${API_URL}${apiPath}`;
+};
 
 if (typeof window !== "undefined") {
   window.MOVORA_API_URL = API_URL;
@@ -178,6 +183,7 @@ export const sendFriendRequest = userId => request(`/social/users/${encodeURICom
 export const respondToFriendRequest = (requestId, status) => request(`/social/requests/${encodeURIComponent(requestId)}/respond`, { method:"POST", body:JSON.stringify({ status }) });
 export const toggleSocialFollow = userId => request(`/social/users/${encodeURIComponent(userId)}/follow`, { method:"POST" });
 export const getSocialReels = cursor => request(`/social/reels?limit=8${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`);
+export const getSocialReel = reelId => request(`/social/reels/${encodeURIComponent(reelId)}`);
 export const createSocialReel = payload => request("/social/reels", { method:"POST", body:JSON.stringify(payload) });
 export const uploadSocialReel = (media, metadata) => request("/social/reels/upload", { method:"POST", body:media, headers:{
   "Content-Type":media.type,
@@ -186,6 +192,27 @@ export const uploadSocialReel = (media, metadata) => request("/social/reels/uplo
   "X-Reel-Location":encodeURIComponent(metadata.location || ""),
   "X-Reel-Privacy":metadata.privacy || "public",
 } });
+export const getSocialReelUploadUrl = (mediaType, fileSize) => {
+  const params = new URLSearchParams({ contentType:mediaType, fileSize:String(fileSize) });
+  return request(`/reels/upload-url?${params}`);
+};
+export const uploadReelObject = (uploadUrl, media, headers = {}, onProgress = () => {}) => new Promise((resolve, reject) => {
+  const xhr = new XMLHttpRequest();
+  xhr.open("PUT", uploadUrl);
+  Object.entries(headers).forEach(([name, value]) => xhr.setRequestHeader(name, value));
+  xhr.upload.addEventListener("progress", event => {
+    if (event.lengthComputable) onProgress(Math.round((event.loaded / event.total) * 100));
+  });
+  xhr.addEventListener("load", () => {
+    if (xhr.status >= 200 && xhr.status < 300) resolve();
+    else reject(new Error(`R2 upload failed (${xhr.status}). Check the bucket CORS policy and presigned URL.`));
+  });
+  xhr.addEventListener("error", () => reject(new Error("Network error uploading video to R2.")));
+  xhr.addEventListener("abort", () => reject(new Error("Video upload was cancelled.")));
+  xhr.send(media);
+});
+export const createSocialReelFromUpload = metadata => request("/reels", { method:"POST", body:JSON.stringify(metadata) });
+export const getSocialReelOriginal = reelId => requestBlob(`/reels/${encodeURIComponent(reelId)}/original`);
 export const getSocialReelMedia = reelId => requestBlob(`/social/reels/${encodeURIComponent(reelId)}/media`);
 export const toggleSocialReelLike = reelId => request(`/social/reels/${encodeURIComponent(reelId)}/like`, { method:"POST" });
 export const getSocialReelComments = reelId => request(`/social/reels/${encodeURIComponent(reelId)}/comments`);
