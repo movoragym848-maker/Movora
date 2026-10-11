@@ -14,7 +14,7 @@ import SocialHub, { CallPanel } from "./components/social/SocialHub";
 
 const SOCIAL_ID_PATTERN = /^[a-z0-9._]{3,30}$/;
 
-export default function App({ user, onLogout }) {
+export default function App({ user, onLogout, sharedReel }) {
   if (!user || !user.email) {
     console.error("App: Invalid user object received", user);
     return null;
@@ -26,8 +26,13 @@ export default function App({ user, onLogout }) {
   const sync = promise => promise.catch(err => console.warn("Movora sync failed:", err.message));
 
   const [tab, setTab] = useState(() => {
-    return LS(`rs_tab_${email}`) || LS("rs_tab") || "dashboard";
+    const hasSharedReel = sharedReel?.id || new URLSearchParams(window.location.search).has("reel");
+    return hasSharedReel ? "reels" : LS(`rs_tab_${email}`) || LS("rs_tab") || "dashboard";
   });
+
+  useEffect(() => {
+    if (sharedReel?.id) setTab("reels");
+  }, [sharedReel]);
   const [celebrating, setCelebrating] = useState(false);
   const [goal, setGoal] = useState(() => {
     return LS(`rs_goal_${email}`) || "bulking";
@@ -710,7 +715,7 @@ export default function App({ user, onLogout }) {
 
         {tab==="check-in" && <CheckInScreen onClose={() => setTab("dashboard")} />}
 
-        {tab==="reels" && <SocialHub mode="reels" user={user} />}
+        {tab==="reels" && <SocialHub key={sharedReel?.version || 0} mode="reels" user={user} />}
         {tab==="messages" && <SocialHub mode="messages" user={user} />}
 
         {/* ── STATS (History + Progress) ── */}

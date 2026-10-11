@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.movora.gym",
+      "sha256_cert_fingerprints": [
+        "C6:49:C5:31:AB:73:1F:E0:56:15:E4:95:BE:A1:8C:93:99:82:F5:BC:7C:71:11:40:BA:C9:68:6A:E8:7A:F6:7B"
+      ]
+    }
+  }
+]
