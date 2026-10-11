@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { DotLottieReact } from "@lottiefiles/dotlottie-react";
 import { addSocialReelComment, createSocialReelFromUpload, getSocialConversations, getSocialReel, getSocialReelComments, getSocialReelMedia, getSocialReelUploadUrl, getSocialReels, resolveApiUrl, sendSocialMessage, toggleSocialReelLike, uploadReelObject, uploadSocialReel } from "../../services/api";
-import likeAnimationUrl from "../../../../like.lottie?url";
+const likeAnimationUrl = `${import.meta.env.BASE_URL}like.lottie`;
 import "./ReelsExperience.css";
 
 const FEED_VIEW = "FEED_VIEW";
