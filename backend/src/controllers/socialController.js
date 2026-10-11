@@ -228,7 +228,7 @@ export async function createReel(req, res, next) {
 }
 
 export async function findVisibleReel(reelId, userId) {
-  const { rows } = await query(`SELECT r.id, r.privacy FROM social_reels r WHERE r.id = $1 AND
+  const { rows } = await query(`SELECT r.id, r.privacy, r.creator_id FROM social_reels r WHERE r.id = $1 AND
     (r.privacy = 'public' OR r.creator_id = $2 OR (r.privacy = 'friends' AND EXISTS (
       SELECT 1 FROM social_friend_requests f WHERE f.status = 'accepted' AND
         ((f.requester_id = $2 AND f.recipient_id = r.creator_id) OR (f.requester_id = r.creator_id AND f.recipient_id = $2))
