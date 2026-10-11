@@ -111,7 +111,7 @@ export async function getMyReelAnalytics(req, res, next) {
         count(c.id)::int AS comments
       FROM periods LEFT JOIN social_reel_comments c
         ON c.reel_id = $1 AND c.created_at >= periods.period_start AND c.created_at < periods.period_start + periods.period_length
-      GROUP BY period_start ORDER BY period_start`, [req.params.reelId]),
+      GROUP BY period_start, periods.unit ORDER BY period_start`, [req.params.reelId]),
       query(`SELECT c.id, c.body, c.parent_comment_id, c.is_pinned, c.created_at, c.user_id,
           COALESCE(p.display_name, 'Movora member') AS display_name, p.username, p.avatar_url
         FROM social_reel_comments c
