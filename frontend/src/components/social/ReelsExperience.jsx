@@ -637,12 +637,13 @@ export default function ReelsExperience({ onExit }) {
   const getShareUrl = reel => {
     const configuredUrl = import.meta.env?.VITE_APP_URL?.trim();
     const browserUrl = /^https?:$/.test(window.location.protocol) ? window.location.origin : "";
-    const baseUrl = configuredUrl || browserUrl;
-    if (!baseUrl) return "";
-    let link;
-    try { link = new URL(baseUrl); }
-    catch { return ""; }
-    if (!/^https?:$/.test(link.protocol) || ["localhost", "127.0.0.1", "0.0.0.0", "::1", "[::1]"].includes(link.hostname)) return "";
+    const candidates = [configuredUrl, browserUrl, "https://movora-production.up.railway.app"].filter(Boolean);
+    const link = candidates.map(candidate => {
+      try { return new URL(candidate); }
+      catch { return null; }
+    }).find(candidate => candidate && /^https?:$/.test(candidate.protocol)
+      && !["localhost", "127.0.0.1", "0.0.0.0", "::1", "[::1]"].includes(candidate.hostname.toLowerCase()));
+    if (!link) return "";
     link.searchParams.set("reel", reel.id);
     link.hash = "";
     return link.toString();
