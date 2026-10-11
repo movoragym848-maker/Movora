@@ -104,7 +104,8 @@ export async function getMyReelAnalytics(req, res, next) {
         ) AS period_start,
         CASE unit WHEN 'day' THEN interval '1 day'
           WHEN 'week' THEN interval '1 week'
-          ELSE interval '1 month' END AS period_length
+          ELSE interval '1 month' END AS period_length,
+        unit
         FROM reel_span
       )
       SELECT to_char(period_start::date, 'YYYY-MM-DD') AS day, periods.unit,
