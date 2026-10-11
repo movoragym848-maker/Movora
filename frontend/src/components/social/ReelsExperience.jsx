@@ -357,6 +357,7 @@ export default function ReelsExperience({ onExit }) {
   const [commentsReel, setCommentsReel] = useState(null);
   const [sharingReel, setSharingReel] = useState(null);
   const [cameraFacing, setCameraFacing] = useState("user");
+  const [cameraSwitching, setCameraSwitching] = useState(false);
   const [cameraError, setCameraError] = useState("");
   const [cameraReady, setCameraReady] = useState(false);
   const [selectedFilter, setSelectedFilter] = useState("original");
@@ -379,6 +380,7 @@ export default function ReelsExperience({ onExit }) {
   const loadMoreRef = useRef(null);
   const cameraVideoRef = useRef(null);
   const cameraStreamRef = useRef(null);
+  const cameraFacingRef = useRef(cameraFacing);
   const recorderRef = useRef(null);
   const recorderChunksRef = useRef([]);
   const recordedBytesRef = useRef(0);
@@ -494,9 +496,9 @@ export default function ReelsExperience({ onExit }) {
       }
       try {
         try {
-          stream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:{ ideal:cameraFacing } }, audio:true });
+          stream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:{ ideal:cameraFacingRef.current } }, audio:true });
         } catch {
-          stream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:{ ideal:cameraFacing } }, audio:false });
+          stream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:{ ideal:cameraFacingRef.current } }, audio:false });
         }
         if (cancelled) { stream.getTracks().forEach(track => track.stop()); return; }
         cameraStreamRef.current = stream;
@@ -526,7 +528,7 @@ export default function ReelsExperience({ onExit }) {
       (stream || cameraStreamRef.current)?.getTracks().forEach(track => track.stop());
       cameraStreamRef.current = null;
     };
-  }, [cameraFacing, view]);
+  }, [view]);
 
   useEffect(() => () => {
     if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
@@ -584,7 +586,7 @@ export default function ReelsExperience({ onExit }) {
             if (previewVideo.readyState >= 2) {
               context.save();
               context.filter = currentFilter.css;
-              if (cameraFacing === "user") {
+              if (cameraFacingRef.current === "user") {
                 context.translate(canvas.width, 0);
                 context.scale(-1, 1);
               }
@@ -665,6 +667,49 @@ export default function ReelsExperience({ onExit }) {
     event.preventDefault();
     recordingStartedRef.current = false;
     holdTimerRef.current = window.setTimeout(() => { recordingStartedRef.current = startRecording(); }, 240);
+  };
+
+  const flipCamera = async () => {
+    if (cameraSwitching || !cameraReady) return;
+    const nextFacing = cameraFacingRef.current === "user" ? "environment" : "user";
+    const currentStream = cameraStreamRef.current;
+    const currentTrack = currentStream?.getVideoTracks()[0];
+    if (!currentTrack) {
+      setCameraError("The active camera is unavailable. Close and reopen the camera to try again.");
+      return;
+    }
+
+    setCameraSwitching(true);
+    setCameraError("");
+    try {
+      try {
+        if (!currentTrack.applyConstraints) throw new Error("In-place camera switching is unavailable.");
+        await currentTrack.applyConstraints({ facingMode:{ exact:nextFacing } });
+      } catch (switchError) {
+        if (recording) throw new Error("This device cannot switch cameras while recording. Stop the video, then flip the camera and continue with another clip.");
+        if (!navigator.mediaDevices?.getUserMedia) throw switchError;
+        let nextStream;
+        try {
+          nextStream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:{ ideal:nextFacing } }, audio:true });
+        } catch {
+          nextStream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:{ ideal:nextFacing } }, audio:false });
+        }
+        if (view !== CAMERA_VIEW || !cameraVideoRef.current) {
+          nextStream.getTracks().forEach(track => track.stop());
+          return;
+        }
+        cameraVideoRef.current.srcObject = nextStream;
+        await cameraVideoRef.current.play().catch(() => {});
+        cameraStreamRef.current = nextStream;
+        currentStream.getTracks().forEach(track => track.stop());
+      }
+      cameraFacingRef.current = nextFacing;
+      setCameraFacing(nextFacing);
+    } catch (error) {
+      setCameraError(error.message || "Unable to switch cameras.");
+    } finally {
+      setCameraSwitching(false);
+    }
   };
 
   const onShutterUp = () => {
@@ -783,7 +828,7 @@ export default function ReelsExperience({ onExit }) {
         : <video className="camera-preview" src={previewUrl} autoPlay muted loop playsInline />)
         : <video ref={cameraVideoRef} className={`camera-preview${cameraFacing === "user" ? " is-selfie" : ""}`} autoPlay muted playsInline style={{ filter:currentFilter.css }} />}
       <div className="camera-vignette" />
-      <header className="camera-topbar"><button type="button" className="camera-back" onClick={() => { retake(); setView(FEED_VIEW); }} aria-label="Close camera">×</button><span>{recording ? <><i className="recording-dot"/> {String(Math.floor(recordingSeconds / 60)).padStart(2, "0")}:{String(recordingSeconds % 60).padStart(2, "0")}</> : "New post"}</span>{capturedMedia ? <button type="button" className="camera-next" onClick={() => { setPublishError(""); setView(POST_DETAILS_VIEW); }}>Next</button> : <button type="button" className="camera-flip" onClick={() => setCameraFacing(current => current === "user" ? "environment" : "user")} disabled={!cameraReady || recording}>Flip</button>}</header>
+      <header className="camera-topbar"><button type="button" className="camera-back" onClick={() => { retake(); setView(FEED_VIEW); }} aria-label="Close camera">×</button><span>{recording ? <><i className="recording-dot"/> {String(Math.floor(recordingSeconds / 60)).padStart(2, "0")}:{String(recordingSeconds % 60).padStart(2, "0")}</> : "New post"}</span>{capturedMedia ? <button type="button" className="camera-next" onClick={() => { setPublishError(""); setView(POST_DETAILS_VIEW); }}>Next</button> : <button type="button" className="camera-flip" onClick={flipCamera} disabled={!cameraReady || cameraSwitching}>{cameraSwitching ? "Switching…" : "Flip"}</button>}</header>
       {cameraError && <p className="camera-error" role="alert">{cameraError}</p>}
       {!capturedMedia && <div className="camera-controls">
         <div className="camera-filters" role="group" aria-label="Camera filters">{filters.map(filter => <button type="button" key={filter.id} className={selectedFilter === filter.id ? "selected" : ""} onClick={() => setSelectedFilter(filter.id)}><span className={`filter-swatch filter-${filter.id}`} />{filter.label}</button>)}</div>

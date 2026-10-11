@@ -19,6 +19,13 @@ export const env = {
   msg91SenderId: process.env.MSG91_SENDER_ID || "MOVORA",
   whatsappAccessToken: process.env.WHATSAPP_ACCESS_TOKEN,
   whatsappPhoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID,
+  r2AccountId: process.env.R2_ACCOUNT_ID,
+  r2AccessKeyId: process.env.R2_ACCESS_KEY_ID,
+  r2SecretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
+  r2BucketName: process.env.R2_BUCKET_NAME,
+  r2EndpointUrl: process.env.R2_ENDPOINT_URL,
+  ffmpegPath: process.env.FFMPEG_PATH || "ffmpeg",
+  reelUploadMaxBytes: Number(process.env.REEL_UPLOAD_MAX_BYTES || 150 * 1024 * 1024),
 };
 
 if (!env.databaseUrl) {

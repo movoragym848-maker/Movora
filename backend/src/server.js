@@ -5,6 +5,7 @@ import { env } from "./config/env.js";
 import { routes } from "./routes/index.js";
 import { cleanupExpiredOTPs } from "./services/otpService.js";
 import { query } from "./db/pool.js";
+import { resumePendingReelTranscodes } from "./services/reelTranscoder.js";
 
 async function ensureGymStaffTable() {
   await query(`
@@ -88,6 +89,9 @@ async function ensureSocialTables() {
   await query("ALTER TABLE social_reels ADD COLUMN IF NOT EXISTS workout_tag text NOT NULL DEFAULT ''");
   await query("ALTER TABLE social_reels ADD COLUMN IF NOT EXISTS location text NOT NULL DEFAULT ''");
   await query("ALTER TABLE social_reels ADD COLUMN IF NOT EXISTS privacy text NOT NULL DEFAULT 'public'");
+  await query("ALTER TABLE social_reels ADD COLUMN IF NOT EXISTS raw_object_key text");
+  await query("ALTER TABLE social_reels ADD COLUMN IF NOT EXISTS processing_error text");
+  await query("CREATE INDEX IF NOT EXISTS idx_social_reels_status_created ON social_reels(status, created_at DESC)");
   await query("ALTER TABLE social_reels ADD COLUMN IF NOT EXISTS video_hls_url text");
   await query("ALTER TABLE social_reels ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'ready'");
   await query(`CREATE TABLE IF NOT EXISTS social_reel_likes (
@@ -176,6 +180,12 @@ try {
 
 app.listen(env.port, "0.0.0.0", () => {
   console.log(`Movora API running on http://localhost:${env.port}`);
+
+  resumePendingReelTranscodes()
+    .then(resumedReels => {
+      if (resumedReels) console.log(`Resuming ${resumedReels} reel transcode job(s)`);
+    })
+    .catch(err => console.error("Failed to resume reel transcodes:", err));
   
   // Clean up expired OTPs on startup
   cleanupExpiredOTPs().catch(err => console.error("Failed to cleanup OTPs:", err));
