@@ -52,6 +52,8 @@
 .profile-analytics-comment-content { flex:1; min-width:0; }
 .profile-analytics-comment-content > div { display:flex; align-items:baseline; gap:8px; }
 .profile-analytics-comment-content strong { color:#263f50; font-size:11px; }
+.profile-analytics-reply-label,.profile-analytics-pinned-label { color:#728794; font-size:9px; }
+.profile-analytics-pinned-label { color:#2677c9; font-weight:700; }
 .profile-analytics-comment-content time { color:#8496a0; font-size:10px; }
 .profile-analytics-comment-content p { margin:4px 0 0; color:#405665; font-size:12px; line-height:1.45; overflow-wrap:anywhere; }
 .profile-analytics-comments-note { padding-top:8px; border-top:1px solid #edf1f4; }

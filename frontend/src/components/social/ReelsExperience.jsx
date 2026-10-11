@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { DotLottieReact } from "@lottiefiles/dotlottie-react";
-import { addSocialReelComment, createSocialReelFromUpload, getSocialConversations, getSocialReel, getSocialReelComments, getSocialReelMedia, getSocialReelUploadUrl, getSocialReels, recordSocialReelEvent, resolveApiUrl, sendSocialMessage, toggleSocialReelLike, uploadReelObject, uploadSocialReel } from "../../services/api";
+import { addSocialReelComment, createSocialReelFromUpload, getSocialConversations, getSocialReel, getSocialReelComments, getSocialReelMedia, getSocialReelUploadUrl, getSocialReels, recordSocialReelEvent, resolveApiUrl, sendSocialMessage, setSocialReelCommentPinned, toggleSocialReelLike, uploadReelObject, uploadSocialReel } from "../../services/api";
 const likeAnimationUrl = `${import.meta.env.BASE_URL}like.lottie`;
 import "./ReelsExperience.css";
 
@@ -188,10 +188,30 @@ function ReelCard({ reel, active, onLike, onComments, onShare }) {
 function CommentsSheet({ reel, onClose, onCommentAdded }) {
   const [comments, setComments] = useState([]);
   const [draft, setDraft] = useState("");
+  const [replyingTo, setReplyingTo] = useState(null);
   const [loading, setLoading] = useState(true);
   const [posting, setPosting] = useState(false);
+  const [pinningId, setPinningId] = useState("");
   const [error, setError] = useState("");
   const commentsEndRef = useRef(null);
+
+  const commentTree = (() => {
+    const byId = new Map(comments.map(comment => [comment.id, { ...comment, replies:[] }]));
+    const roots = [];
+    byId.forEach(comment => {
+      const parent = comment.parent_comment_id && byId.get(comment.parent_comment_id);
+      if (parent) parent.replies.push(comment);
+      else roots.push(comment);
+    });
+    const threadIsPinned = comment => comment.is_pinned || comment.replies.some(threadIsPinned);
+    const sortThread = comment => {
+      comment.replies.sort((a, b) => Number(b.is_pinned) - Number(a.is_pinned) || new Date(a.created_at) - new Date(b.created_at));
+      comment.replies.forEach(sortThread);
+    };
+    roots.sort((a, b) => Number(threadIsPinned(b)) - Number(threadIsPinned(a)) || new Date(a.created_at) - new Date(b.created_at));
+    roots.forEach(sortThread);
+    return roots;
+  })();
 
   useEffect(() => {
     let mounted = true;
@@ -205,14 +225,41 @@ function CommentsSheet({ reel, onClose, onCommentAdded }) {
     setPosting(true);
     setError("");
     try {
-      const comment = await addSocialReelComment(reel.id, draft.trim());
+      const comment = await addSocialReelComment(reel.id, draft.trim(), replyingTo?.id);
       setComments(current => [...current, comment]);
       setDraft("");
+      setReplyingTo(null);
       onCommentAdded();
       requestAnimationFrame(() => commentsEndRef.current?.scrollIntoView({ behavior: "smooth" }));
     } catch (err) { setError(err.message || "Unable to add comment."); }
     finally { setPosting(false); }
   };
+
+  const togglePinned = async comment => {
+    setPinningId(comment.id);
+    setError("");
+    try {
+      const pinned = !comment.is_pinned;
+      await setSocialReelCommentPinned(reel.id, comment.id, pinned);
+      setComments(current => current.map(item => ({ ...item, is_pinned:pinned && item.id === comment.id })));
+    } catch (err) { setError(err.message || "Unable to update pinned comment."); }
+    finally { setPinningId(""); }
+  };
+
+  const renderComment = comment => <div className="reel-comment-thread" key={comment.id}>
+    <div className={`reel-comment${comment.is_pinned ? " is-pinned" : ""}`}>
+      <span className="reel-comment-avatar">{initials(comment.display_name)}</span>
+      <div className="reel-comment-content">
+        <div className="reel-comment-heading"><strong>{comment.display_name}</strong>{comment.is_pinned && <span className="reel-comment-pinned">Pinned</span>}</div>
+        <p>{comment.body}</p>
+        <div className="reel-comment-tools">
+          <button type="button" onClick={() => { setReplyingTo(comment); setDraft(""); }}>Reply</button>
+          {comment.can_manage && <button type="button" disabled={Boolean(pinningId)} onClick={() => togglePinned(comment)}>{pinningId === comment.id ? "…" : comment.is_pinned ? "Unpin" : "Pin"}</button>}
+        </div>
+      </div>
+    </div>
+    {comment.replies.length > 0 && <div className="reel-comment-replies">{comment.replies.map(renderComment)}</div>}
+  </div>;
 
   return <div className="reel-sheet-backdrop" onClick={onClose}>
     <section className="reel-comments-sheet" role="dialog" aria-modal="true" aria-label="Comments" onClick={event => event.stopPropagation()}>
@@ -221,11 +268,12 @@ function CommentsSheet({ reel, onClose, onCommentAdded }) {
       <div className="reel-comments-list">
         {loading && <p className="reel-comments-empty">Loading comments...</p>}
         {!loading && comments.length === 0 && <p className="reel-comments-empty">Start the conversation.</p>}
-        {comments.map(comment => <div className="reel-comment" key={comment.id}><span className="reel-comment-avatar">{initials(comment.display_name)}</span><div><strong>{comment.display_name}</strong><p>{comment.body}</p></div></div>)}
+        {commentTree.map(renderComment)}
         <div ref={commentsEndRef} />
       </div>
       {error && <p className="reel-form-error" role="alert">{error}</p>}
-      <form className="reel-comment-form" onSubmit={submit}><input value={draft} onChange={event => setDraft(event.target.value.slice(0, 500))} maxLength={500} placeholder="Add a comment..." aria-label="Add a comment"/><button type="submit" disabled={posting || !draft.trim()}>{posting ? "..." : "Post"}</button></form>
+      {replyingTo && <div className="reel-replying-to"><span>Replying to {replyingTo.display_name}</span><button type="button" onClick={() => { setReplyingTo(null); setDraft(""); }} aria-label="Cancel reply">×</button></div>}
+      <form className="reel-comment-form" onSubmit={submit}><input value={draft} onChange={event => setDraft(event.target.value.slice(0, 500))} maxLength={500} placeholder={replyingTo ? `Reply to ${replyingTo.display_name}...` : "Add a comment..."} aria-label={replyingTo ? `Reply to ${replyingTo.display_name}` : "Add a comment"}/><button type="submit" disabled={posting || !draft.trim()}>{posting ? "..." : replyingTo ? "Reply" : "Post"}</button></form>
     </section>
   </div>;
 }

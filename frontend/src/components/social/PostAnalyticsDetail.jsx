@@ -166,7 +166,7 @@ export default function PostAnalyticsDetail({ reelId, onBack, onDeleted }) {
           <ChartFrame title="Audience split" empty={!analytics.reel.reach}>
             <ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={audienceData} dataKey="value" nameKey="name" innerRadius="48%" outerRadius="76%" paddingAngle={2}>{audienceData.map((entry, index) => <Cell key={entry.name} fill={audienceColors[index]}/>)}</Pie><Tooltip/></PieChart></ResponsiveContainer>
           </ChartFrame>
-          <ChartFrame title="Comments · lifetime" empty={!analytics.reel.comments}>
+          <ChartFrame title={`Comments · lifetime (${analytics.commentVelocityUnit || "day"})`} empty={!analytics.reel.comments}>
             <ResponsiveContainer width="100%" height="100%"><BarChart data={analytics.commentVelocity}><CartesianGrid stroke="#e8eef2" vertical={false}/><XAxis dataKey="day" tickFormatter={value => value.slice(5)} tick={{ fontSize:9 }}/><YAxis allowDecimals={false} width={25} tick={{ fontSize:9 }}/><Tooltip/><Bar dataKey="comments" fill="#12a18a" radius={[3,3,0,0]}/></BarChart></ResponsiveContainer>
           </ChartFrame>
         </div>
@@ -176,7 +176,7 @@ export default function PostAnalyticsDetail({ reelId, onBack, onDeleted }) {
           {analytics.comments?.map(comment => <article className="profile-analytics-comment" key={comment.id}>
             <span className="profile-analytics-comment-avatar">{initials(comment.display_name)}</span>
             <div className="profile-analytics-comment-content">
-              <div><strong>{comment.display_name}</strong><time dateTime={comment.created_at}>{new Date(comment.created_at).toLocaleDateString()}</time></div>
+              <div><strong>{comment.display_name}</strong>{comment.parent_comment_id && <span className="profile-analytics-reply-label">Reply</span>}{comment.is_pinned && <span className="profile-analytics-pinned-label">Pinned</span>}<time dateTime={comment.created_at}>{new Date(comment.created_at).toLocaleDateString()}</time></div>
               <p>{comment.body}</p>
             </div>
           </article>)}

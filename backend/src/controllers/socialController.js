@@ -11,7 +11,10 @@ const messageSchema = z.object({ body: z.string().trim().min(1).max(2000) });
 const reelSchema = z.object({ videoUrl: z.string().url().max(2000), thumbnailUrl: z.string().url().max(2000).nullable().optional(), caption: z.string().max(220).optional().default(""), workoutTag:z.string().max(40).optional().default(""), location:z.string().max(100).optional().default(""), privacy:z.enum(["public", "friends", "private"]).optional().default("public") });
 const callSignalSchema = z.object({ type: z.enum(["offer", "answer", "candidate", "hangup"]), payload: z.record(z.any()).default({}) });
 const noteSchema = z.object({ text: z.string().trim().min(1).max(80) });
-const reelCommentSchema = z.object({ body:z.string().trim().min(1).max(500) });
+const reelCommentSchema = z.object({
+  body:z.string().trim().min(1).max(500),
+  parentCommentId:z.string().uuid().optional(),
+});
 const reelMediaTypes = new Set(["image/jpeg", "image/png", "image/webp", "video/mp4", "video/webm", "video/quicktime", "video/3gpp"]);
 const configuredReelMediaBytes = Number(process.env.REEL_UPLOAD_MAX_BYTES);
 export const maxReelMediaBytes = Number.isSafeInteger(configuredReelMediaBytes) && configuredReelMediaBytes > 0
@@ -323,9 +326,14 @@ export async function getSocialReelComments(req, res, next) {
     const userId = authUser(req);
     if (!userId) return res.status(403).json({ message: "Social features are available for member accounts." });
     if (!await findVisibleReel(req.params.reelId, userId)) return res.status(404).json({ message: "Post not found." });
-    const { rows } = await query(`SELECT c.id, c.body, c.created_at, p.user_id, p.display_name
-      FROM social_reel_comments c JOIN social_profiles p ON p.user_id = c.user_id
-      WHERE c.reel_id = $1 ORDER BY c.created_at ASC LIMIT 100`, [req.params.reelId]);
+    const { rows } = await query(`SELECT c.id, c.body, c.parent_comment_id, c.is_pinned, c.created_at,
+        p.user_id, p.display_name, p.username, p.avatar_url, (r.creator_id = $2) AS can_manage
+      FROM social_reel_comments c
+      JOIN social_reels r ON r.id = c.reel_id
+      LEFT JOIN social_profiles p ON p.user_id = c.user_id
+      WHERE c.reel_id = $1
+      ORDER BY c.is_pinned DESC, c.created_at ASC
+      LIMIT 500`, [req.params.reelId, userId]);
     res.json(rows);
   } catch (err) { next(err); }
 }
@@ -336,14 +344,38 @@ export async function addSocialReelComment(req, res, next) {
     if (!userId) return res.status(403).json({ message: "Social features are available for member accounts." });
     if (!await findVisibleReel(req.params.reelId, userId)) return res.status(404).json({ message: "Post not found." });
     const input = reelCommentSchema.parse(req.body);
-    const { rows } = await query(`INSERT INTO social_reel_comments (reel_id, user_id, body) VALUES ($1, $2, $3)
-      RETURNING id, body, created_at`, [req.params.reelId, userId, input.body]);
-    const { rows:profileRows } = await query("SELECT user_id, display_name FROM social_profiles WHERE user_id = $1", [userId]);
+    if (input.parentCommentId) {
+      const parent = await query("SELECT id FROM social_reel_comments WHERE id = $1 AND reel_id = $2", [input.parentCommentId, req.params.reelId]);
+      if (!parent.rowCount) return res.status(404).json({ message:"Comment not found on this post." });
+    }
+    const { rows } = await query(`INSERT INTO social_reel_comments (reel_id, user_id, body, parent_comment_id)
+      VALUES ($1, $2, $3, $4)
+      RETURNING id, body, parent_comment_id, is_pinned, created_at`, [req.params.reelId, userId, input.body, input.parentCommentId || null]);
+    const { rows:profileRows } = await query(`SELECT p.user_id, p.display_name, p.username, p.avatar_url,
+        (r.creator_id = p.user_id) AS can_manage
+      FROM social_profiles p JOIN social_reels r ON r.id = $2
+      WHERE p.user_id = $1`, [userId, req.params.reelId]);
     res.status(201).json({ ...rows[0], ...profileRows[0] });
   } catch (err) {
     if (err instanceof z.ZodError) return res.status(400).json({ message: "Comments must contain 1-500 characters." });
     next(err);
   }
+}
+
+export async function pinSocialReelComment(req, res, next) {
+  try {
+    const userId = authUser(req);
+    if (!userId) return res.status(403).json({ message:"Social features are available for member accounts." });
+    const owner = await query("SELECT 1 FROM social_reels WHERE id = $1 AND creator_id = $2", [req.params.reelId, userId]);
+    if (!owner.rowCount) return res.status(404).json({ message:"Post not found." });
+    const comment = await query("SELECT 1 FROM social_reel_comments WHERE id = $1 AND reel_id = $2", [req.params.commentId, req.params.reelId]);
+    if (!comment.rowCount) return res.status(404).json({ message:"Comment not found on this post." });
+    const pinned = req.body?.pinned !== false;
+    await query(`UPDATE social_reel_comments
+      SET is_pinned = ($2 IS NOT NULL AND id = $2)
+      WHERE reel_id = $1`, [req.params.reelId, pinned ? req.params.commentId : null]);
+    res.json({ commentId:req.params.commentId, pinned });
+  } catch (err) { next(err); }
 }
 
 async function getConversation(userId, otherId) {

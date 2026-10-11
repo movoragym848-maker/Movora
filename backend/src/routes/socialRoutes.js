@@ -1,6 +1,6 @@
 import express, { Router } from "express";
 import { requireAuth } from "../middleware/auth.js";
-import { addSocialReelComment, createReel, createUploadedReel, getSocialNotes, getSocialProfile, getSocialReel, getSocialReelComments, getSocialReelMedia, getTypingStatus, listCallSignals, listConversations, listFriendRequests, listMessages, listReels, maxReelMediaBytes, respondToFriendRequest, saveSocialNote, saveSocialProfile, searchSocialProfiles, sendCallSignal, sendFriendRequest, sendMessage, setTypingStatus, toggleFollow, toggleReelLike } from "../controllers/socialController.js";
+import { addSocialReelComment, createReel, createUploadedReel, getSocialNotes, getSocialProfile, getSocialReel, getSocialReelComments, getSocialReelMedia, getTypingStatus, listCallSignals, listConversations, listFriendRequests, listMessages, listReels, maxReelMediaBytes, pinSocialReelComment, respondToFriendRequest, saveSocialNote, saveSocialProfile, searchSocialProfiles, sendCallSignal, sendFriendRequest, sendMessage, setTypingStatus, toggleFollow, toggleReelLike } from "../controllers/socialController.js";
 import { deleteMyReel, getMyReelAnalytics, listMyReels, recordMyReelEvent, toggleMyReelSave, updateMyReelPrivacy } from "../controllers/reelAnalyticsController.js";
 
 export const socialRoutes = Router();
@@ -28,6 +28,7 @@ socialRoutes.get("/reels/:reelId/media", getSocialReelMedia);
 socialRoutes.post("/reels/:reelId/like", toggleReelLike);
 socialRoutes.get("/reels/:reelId/comments", getSocialReelComments);
 socialRoutes.post("/reels/:reelId/comments", addSocialReelComment);
+socialRoutes.put("/reels/:reelId/comments/:commentId/pin", pinSocialReelComment);
 socialRoutes.get("/conversations", listConversations);
 socialRoutes.get("/conversations/:conversationId/messages", listMessages);
 socialRoutes.get("/conversations/:conversationId/typing", getTypingStatus);

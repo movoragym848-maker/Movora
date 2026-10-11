@@ -89,10 +89,19 @@
 .reel-comments-list { display:grid; align-content:start; gap:15px; min-height:110px; overflow:auto; padding:16px 0; }
 .reel-comments-empty { margin:18px 0; color:#8296a3; font-size:13px; text-align:center; }
 .reel-comment { display:flex; align-items:flex-start; gap:10px; }
-.reel-comment-avatar { flex-basis:32px; width:32px; height:32px; border:0; background:#dcecff; color:#2773ca; }
-.reel-comment > div { display:grid; gap:3px; min-width:0; }
+.reel-comment-avatar { flex:0 0 32px; width:32px; height:32px; border:0; background:#dcecff; color:#2773ca; }
+.reel-comment-content { display:grid; gap:3px; min-width:0; }
+.reel-comment-heading { display:flex; align-items:center; gap:7px; }
 .reel-comment strong { font-size:12px; }
-.reel-comment p { margin:0; color:#3e5360; font-size:13px; line-height:1.4; overflow-wrap:anywhere; }
+.reel-comment-content p { margin:0; color:#3e5360; font-size:13px; line-height:1.4; overflow-wrap:anywhere; }
+.reel-comment.is-pinned { border-radius:7px; background:#f4f8fc; padding:6px; }
+.reel-comment-pinned { border-radius:8px; padding:2px 6px; background:#e0edfa; color:#2874cb; font-size:9px; font-weight:700; }
+.reel-comment-tools { display:flex; gap:12px; margin-top:1px; }
+.reel-comment-tools button { min-height:22px; border:0; padding:0; background:transparent; color:#728794; font:600 10px 'Barlow',sans-serif; cursor:pointer; }
+.reel-comment-tools button:disabled { opacity:.5; }
+.reel-comment-replies { display:grid; gap:10px; margin:8px 0 0 40px; border-left:2px solid #e0eaf1; padding-left:10px; }
+.reel-replying-to { display:flex; justify-content:space-between; align-items:center; padding:6px 2px 0; color:#607786; font-size:11px; }
+.reel-replying-to button { border:0; background:transparent; color:#607786; font-size:19px; cursor:pointer; }
 .reel-comment-form { display:flex; gap:8px; padding-top:10px; border-top:1px solid #e9eef2; }
 .reel-comment-form input { flex:1; min-width:0; border:1px solid #d9e3e9; border-radius:22px; padding:10px 13px; outline:0; font:13px 'Barlow',sans-serif; }
 .reel-comment-form button { border:0; background:transparent; color:#3182e8; font:700 13px 'Barlow',sans-serif; cursor:pointer; }

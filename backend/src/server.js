@@ -101,8 +101,13 @@ async function ensureSocialTables() {
     reel_id uuid NOT NULL REFERENCES social_reels(id) ON DELETE CASCADE,
     user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     body text NOT NULL CHECK (char_length(body) BETWEEN 1 AND 500),
+    parent_comment_id uuid REFERENCES social_reel_comments(id) ON DELETE CASCADE,
+    is_pinned boolean NOT NULL DEFAULT false,
     created_at timestamptz NOT NULL DEFAULT now()
   )`);
+  await query("ALTER TABLE social_reel_comments ADD COLUMN IF NOT EXISTS parent_comment_id uuid REFERENCES social_reel_comments(id) ON DELETE CASCADE");
+  await query("ALTER TABLE social_reel_comments ADD COLUMN IF NOT EXISTS is_pinned boolean NOT NULL DEFAULT false");
+  await query("CREATE INDEX IF NOT EXISTS idx_social_reel_comments_parent ON social_reel_comments(reel_id, parent_comment_id, created_at ASC)");
   await query("CREATE INDEX IF NOT EXISTS idx_social_reel_comments_created ON social_reel_comments(reel_id, created_at ASC)");
   await query(`CREATE TABLE IF NOT EXISTS social_reel_saves (
     reel_id uuid NOT NULL REFERENCES social_reels(id) ON DELETE CASCADE,

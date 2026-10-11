@@ -86,17 +86,33 @@ export async function getMyReelAnalytics(req, res, next) {
       LEFT JOIN social_follows f ON f.follower_id = e.actor_id AND f.following_id = r.creator_id
       WHERE e.reel_id = $1 AND e.event_type = 'impression' AND e.actor_id <> r.creator_id
       GROUP BY audience`, [req.params.reelId]),
-      query(`WITH days AS (
+      query(`WITH reel_span AS (
+        SELECT created_at::date AS started,
+          CASE WHEN current_date - created_at::date <= 60 THEN 'day'
+            WHEN current_date - created_at::date <= 730 THEN 'week'
+            ELSE 'month' END AS unit
+        FROM social_reels WHERE id = $1
+      ), periods AS (
         SELECT generate_series(
-          (SELECT created_at::date FROM social_reels WHERE id = $1),
-          current_date,
-          interval '1 day'
-        )::date AS day
+          CASE unit WHEN 'day' THEN started::timestamp
+            WHEN 'week' THEN date_trunc('week', started::timestamp)
+            ELSE date_trunc('month', started::timestamp) END,
+          current_date::timestamp,
+          CASE unit WHEN 'day' THEN interval '1 day'
+            WHEN 'week' THEN interval '1 week'
+            ELSE interval '1 month' END
+        ) AS period_start,
+        CASE unit WHEN 'day' THEN interval '1 day'
+          WHEN 'week' THEN interval '1 week'
+          ELSE interval '1 month' END AS period_length
+        FROM reel_span
       )
-      SELECT days.day::text AS day, count(c.id)::int AS comments
-      FROM days LEFT JOIN social_reel_comments c ON c.reel_id = $1 AND c.created_at::date = days.day
-      GROUP BY days.day ORDER BY days.day`, [req.params.reelId]),
-      query(`SELECT c.id, c.body, c.created_at, c.user_id,
+      SELECT to_char(period_start::date, 'YYYY-MM-DD') AS day, periods.unit,
+        count(c.id)::int AS comments
+      FROM periods LEFT JOIN social_reel_comments c
+        ON c.reel_id = $1 AND c.created_at >= periods.period_start AND c.created_at < periods.period_start + periods.period_length
+      GROUP BY period_start ORDER BY period_start`, [req.params.reelId]),
+      query(`SELECT c.id, c.body, c.parent_comment_id, c.is_pinned, c.created_at, c.user_id,
           COALESCE(p.display_name, 'Movora member') AS display_name, p.username, p.avatar_url
         FROM social_reel_comments c
         LEFT JOIN social_profiles p ON p.user_id = c.user_id
@@ -113,6 +129,7 @@ export async function getMyReelAnalytics(req, res, next) {
       retention:retention.rows,
       audience:audienceCounts,
       commentVelocity:commentVelocity.rows,
+      commentVelocityUnit:commentVelocity.rows[0]?.unit || "day",
       comments:postComments.rows,
     });
   } catch (err) { next(err); }

@@ -223,7 +223,8 @@ export const getSocialReelOriginal = reelId => requestBlob(`/reels/${encodeURICo
 export const getSocialReelMedia = reelId => requestBlob(`/social/reels/${encodeURIComponent(reelId)}/media`);
 export const toggleSocialReelLike = reelId => request(`/social/reels/${encodeURIComponent(reelId)}/like`, { method:"POST" });
 export const getSocialReelComments = reelId => request(`/social/reels/${encodeURIComponent(reelId)}/comments`);
-export const addSocialReelComment = (reelId, body) => request(`/social/reels/${encodeURIComponent(reelId)}/comments`, { method:"POST", body:JSON.stringify({ body }) });
+export const addSocialReelComment = (reelId, body, parentCommentId) => request(`/social/reels/${encodeURIComponent(reelId)}/comments`, { method:"POST", body:JSON.stringify({ body, ...(parentCommentId ? { parentCommentId } : {}) }) });
+export const setSocialReelCommentPinned = (reelId, commentId, pinned) => request(`/social/reels/${encodeURIComponent(reelId)}/comments/${encodeURIComponent(commentId)}/pin`, { method:"PUT", body:JSON.stringify({ pinned }) });
 export const getSocialConversations = () => request("/social/conversations");
 export const getSocialMessages = conversationId => request(`/social/conversations/${encodeURIComponent(conversationId)}/messages`);
 export const getSocialTyping = conversationId => request(`/social/conversations/${encodeURIComponent(conversationId)}/typing`);
