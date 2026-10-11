@@ -11,6 +11,8 @@ import SettingsPagesModal from "./components/common/SettingsPagesModal";
 import * as api from "./services/api";
 import CheckInScreen from "./components/check-in/CheckInScreen";
 import SocialHub, { CallPanel } from "./components/social/SocialHub";
+import ProfilePostsGallery from "./components/social/ProfilePostsGallery";
+import PostAnalyticsDetail from "./components/social/PostAnalyticsDetail";
 
 const SOCIAL_ID_PATTERN = /^[a-z0-9._]{3,30}$/;
 
@@ -29,6 +31,8 @@ export default function App({ user, onLogout, sharedReel }) {
     const hasSharedReel = sharedReel?.id || new URLSearchParams(window.location.search).has("reel");
     return hasSharedReel ? "reels" : LS(`rs_tab_${email}`) || LS("rs_tab") || "dashboard";
   });
+  const [profileSubpage, setProfileSubpage] = useState("");
+  const [selectedPostId, setSelectedPostId] = useState("");
 
   useEffect(() => {
     if (sharedReel?.id) setTab("reels");
@@ -400,6 +404,20 @@ export default function App({ user, onLogout, sharedReel }) {
         html, body, #root, #root > div { width:100%; max-width:100%; min-width:0; overflow-x:hidden; }
         body { overflow-x:hidden; background:#F3F4F6; }
         #root { min-height:100dvh; }
+        .profile-summary-card { display:flex; align-items:center; gap:18px; width:100%; min-height:174px; border:1px solid ${C.border}; border-radius:16px; padding:20px; margin-bottom:14px; background:${C.card}; }
+        .profile-summary-avatar { position:relative; flex:0 0 96px; width:96px; height:96px; }
+        .profile-summary-avatar > img { display:block; width:96px; height:96px; border-radius:50%; object-fit:cover; border:3px solid ${C.primary}; }
+        .profile-summary-edit { position:absolute !important; right:-4px !important; bottom:-2px !important; display:grid !important; place-items:center !important; width:30px !important; height:30px !important; min-height:30px !important; padding:0 !important; border:3px solid ${C.card} !important; border-radius:50% !important; background:${C.dark} !important; color:#fff !important; font-size:18px !important; line-height:1 !important; text-transform:none !important; letter-spacing:0 !important; }
+        .profile-summary-body { flex:1; min-width:0; cursor:pointer; border-radius:8px; padding:4px 2px; }
+        .profile-summary-body:focus-visible { outline:2px solid ${C.primary}; outline-offset:3px; }
+        .profile-summary-name { color:${C.dark}; font-weight:800; font-size:26px; line-height:1.1; font-family:'Barlow Condensed',sans-serif; }
+        .profile-summary-bio { margin-top:4px; color:${C.muted}; font-size:13px; line-height:1.4; }
+        .profile-summary-stats { display:flex; align-items:center; gap:28px; margin-top:13px; }
+        .profile-summary-stat { min-width:58px; }
+        .profile-summary-stat strong { display:block; color:${C.dark}; font-size:18px; line-height:1.1; font-weight:800; font-family:'Barlow Condensed',sans-serif; }
+        .profile-summary-stat span { display:block; margin-top:3px; color:${C.muted}; font-size:11px; }
+        .profile-summary-link { margin-top:9px; color:${C.primary}; font-size:12px; font-weight:700; }
+        @media (max-width:420px) { .profile-summary-card { gap:12px; min-height:150px; padding:14px; } .profile-summary-avatar,.profile-summary-avatar > img { flex-basis:74px; width:74px; height:74px; } .profile-summary-name { font-size:22px; } .profile-summary-stats { gap:16px; margin-top:10px; } .profile-summary-stat { min-width:44px; } }
         .app-content-wrapper { width:min(100%,680px); max-width:100%; }
         .app-content-wrapper, .app-content-wrapper * { max-width:100%; box-sizing:border-box; }
         .app-header, .bottom-nav-bar, .calorie-header-flex, .gym-search-container, .weight-stats-grid, .dashboard-stats-grid, .meal-cards-grid, .profile-grid { overflow-x:hidden; }
@@ -715,7 +733,7 @@ export default function App({ user, onLogout, sharedReel }) {
 
         {tab==="check-in" && <CheckInScreen onClose={() => setTab("dashboard")} />}
 
-        {tab==="reels" && <SocialHub key={sharedReel?.version || 0} mode="reels" user={user} />}
+        {tab==="reels" && <SocialHub key={sharedReel?.version || 0} mode="reels" user={user} onExit={() => setTab("dashboard")} />}
         {tab==="messages" && <SocialHub mode="messages" user={user} />}
 
         {/* ── STATS (History + Progress) ── */}
@@ -1366,28 +1384,37 @@ export default function App({ user, onLogout, sharedReel }) {
           </>
         )}
 
+        {tab==="profile" && profileSubpage==="gallery" && <ProfilePostsGallery
+          onBack={() => setProfileSubpage("")}
+          onSelectPost={post => { setSelectedPostId(post.id); setProfileSubpage("analytics"); }}
+        />}
+        {tab==="profile" && profileSubpage==="analytics" && selectedPostId && <PostAnalyticsDetail
+          reelId={selectedPostId}
+          onBack={() => setProfileSubpage("gallery")}
+          onDeleted={() => { setSelectedPostId(""); setProfileSubpage("gallery"); }}
+        />}
+
         {/* ── PROFILE ── */}
-        {tab==="profile" && (
+        {tab==="profile" && !profileSubpage && (
           <>
             <SectionTitle>Profile</SectionTitle>
-            <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:16, padding:"22px 20px", marginBottom:14 }}>
-              <div style={{ display:"flex", alignItems:"center", gap:18, flexWrap:"wrap" }}>
-                <div style={{ position:"relative", flexShrink:0 }}>
-                  {profile.avatar ? <img src={profile.avatar} alt={`${profile.displayName}'s profile`} style={{ width:84, height:84, borderRadius:"50%", objectFit:"cover", border:`3px solid ${C.primary}` }} /> : <Avatar name={profile.displayName} size={84} />}
-                  <button type="button" onClick={() => { setProfileDraft({ ...profile, socialId:socialProfile?.username || "" }); setProfileError(""); setShowProfileEditor(true); }} aria-label="Edit profile" title="Edit profile" style={{ position:"absolute", right:-4, bottom:-2, width:30, height:30, borderRadius:"50%", border:`3px solid ${C.card}`, background:C.dark, color:"#fff", fontSize:18, lineHeight:1, cursor:"pointer" }}>+</button>
+            <div className="profile-summary-card">
+              <div className="profile-summary-avatar">
+                {profile.avatar ? <img src={profile.avatar} alt={`${profile.displayName}'s profile`} /> : <Avatar name={profile.displayName} size={78} />}
+                <button className="profile-summary-edit" type="button" onClick={() => { setProfileDraft({ ...profile, socialId:socialProfile?.username || "" }); setProfileError(""); setShowProfileEditor(true); }} aria-label="Edit profile" title="Edit profile">+</button>
+              </div>
+              <div className="profile-summary-body" role="button" tabIndex={0} onClick={() => setProfileSubpage("gallery")} onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setProfileSubpage("gallery"); } }} aria-label="Open your posts gallery">
+                <div className="profile-summary-name">{profile.displayName}</div>
+                <div className="profile-summary-bio">{profile.bio || "Add a short bio about your fitness journey."}</div>
+                <div className="profile-summary-stats">
+                  {[['Posts', socialProfile?.posts ?? 0], ['Followers', socialProfile?.followers ?? 0], ['Following', socialProfile?.following ?? 0]].map(([label, value]) => (
+                    <div className="profile-summary-stat" key={label}>
+                      <strong>{value}</strong>
+                      <span>{label}</span>
+                    </div>
+                  ))}
                 </div>
-                <div style={{ flex:1, minWidth:180 }}>
-                  <div style={{ color:C.dark, fontWeight:800, fontSize:27, fontFamily:"'Barlow Condensed',sans-serif" }}>{profile.displayName}</div>
-                  <div style={{ color:C.muted, fontSize:13, marginTop:3 }}>{profile.bio || "Add a short bio about your fitness journey."}</div>
-                  <div style={{ display:"flex", gap:18, marginTop:14, flexWrap:"wrap" }}>
-                    {[['Posts', socialProfile?.posts ?? 0], ['Followers', socialProfile?.followers ?? 0], ['Following', socialProfile?.following ?? 0]].map(([label, value]) => (
-                      <div key={label} style={{ minWidth:64 }}>
-                        <div style={{ color:C.dark, fontSize:18, fontWeight:800, fontFamily:"'Barlow Condensed',sans-serif" }}>{value}</div>
-                        <div style={{ color:C.muted, fontSize:11 }}>{label}</div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
+                <div className="profile-summary-link">View my posts</div>
               </div>
             </div>
 

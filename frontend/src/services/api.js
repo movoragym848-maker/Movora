@@ -184,6 +184,13 @@ export const respondToFriendRequest = (requestId, status) => request(`/social/re
 export const toggleSocialFollow = userId => request(`/social/users/${encodeURIComponent(userId)}/follow`, { method:"POST" });
 export const getSocialReels = cursor => request(`/social/reels?limit=8${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`);
 export const getSocialReel = reelId => request(`/social/reels/${encodeURIComponent(reelId)}`);
+export const getMySocialReels = () => request("/social/my/reels");
+export const getMyReelAnalytics = reelId => request(`/social/my/reels/${encodeURIComponent(reelId)}/analytics`);
+export const updateMyReelPrivacy = (reelId, privacy) => request(`/social/my/reels/${encodeURIComponent(reelId)}/privacy`, { method:"PUT", body:JSON.stringify({ privacy }) });
+export const deleteMyReel = reelId => request(`/social/my/reels/${encodeURIComponent(reelId)}`, { method:"DELETE" });
+export const recordSocialReelEvent = (reelId, event) => request(`/social/reels/${encodeURIComponent(reelId)}/events`, { method:"POST", body:JSON.stringify(event) });
+export const toggleSocialReelSave = reelId => request(`/social/reels/${encodeURIComponent(reelId)}/save`, { method:"POST" });
+export const getSocialReelPreview = path => requestBlob(path.startsWith("/api/") ? path.slice(4) : path);
 export const createSocialReel = payload => request("/social/reels", { method:"POST", body:JSON.stringify(payload) });
 export const uploadSocialReel = (media, metadata) => request("/social/reels/upload", { method:"POST", body:media, headers:{
   "Content-Type":media.type,

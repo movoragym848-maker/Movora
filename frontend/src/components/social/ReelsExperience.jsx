@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { DotLottieReact } from "@lottiefiles/dotlottie-react";
-import { addSocialReelComment, createSocialReelFromUpload, getSocialConversations, getSocialReel, getSocialReelComments, getSocialReelMedia, getSocialReelUploadUrl, getSocialReels, resolveApiUrl, sendSocialMessage, toggleSocialReelLike, uploadReelObject, uploadSocialReel } from "../../services/api";
+import { addSocialReelComment, createSocialReelFromUpload, getSocialConversations, getSocialReel, getSocialReelComments, getSocialReelMedia, getSocialReelUploadUrl, getSocialReels, recordSocialReelEvent, resolveApiUrl, sendSocialMessage, toggleSocialReelLike, uploadReelObject, uploadSocialReel } from "../../services/api";
 const likeAnimationUrl = `${import.meta.env.BASE_URL}like.lottie`;
 import "./ReelsExperience.css";
 
@@ -33,6 +33,26 @@ function ReelCard({ reel, active, onLike, onComments, onShare }) {
   const videoRef = useRef(null);
   const likeAnimationTimerRef = useRef(null);
   const videoClickTimerRef = useRef(null);
+  const watchSampleRef = useRef({ currentTime:0, sentAt:0 });
+
+  useEffect(() => {
+    if (active) recordSocialReelEvent(reel.id, { eventType:"impression" }).catch(() => {});
+  }, [active, reel.id]);
+
+  const handleWatchTime = event => {
+    const video = event.currentTarget;
+    const now = Date.now();
+    const previous = watchSampleRef.current;
+    if (!previous.sentAt) {
+      watchSampleRef.current = { currentTime:video.currentTime, sentAt:now };
+      return;
+    }
+    if (now - previous.sentAt < 5000) return;
+    const watchMs = Math.max(0, Math.min(30000, Math.round((video.currentTime - previous.currentTime) * 1000)));
+    const progressPct = Number.isFinite(video.duration) && video.duration > 0 ? Math.min(100, Math.round(video.currentTime / video.duration * 100)) : 0;
+    watchSampleRef.current = { currentTime:video.currentTime, sentAt:now };
+    if (watchMs) recordSocialReelEvent(reel.id, { eventType:"watch", watchMs, progressPct }).catch(() => {});
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -146,7 +166,7 @@ function ReelCard({ reel, active, onLike, onComments, onShare }) {
   return <article className="reel-page" data-reel-id={reel.id} onDoubleClick={likeWithAnimation}>
     {source && (isImage
       ? <img className="reel-media" src={source} alt="" />
-      : <video ref={videoRef} className="reel-media" src={source.includes(".m3u8") ? undefined : source} playsInline loop muted preload="metadata" onClick={toggleVideoPlayback} />)}
+      : <video ref={videoRef} className="reel-media" src={source.includes(".m3u8") ? undefined : source} playsInline loop muted preload="metadata" onClick={toggleVideoPlayback} onTimeUpdate={handleWatchTime} />)}
     {mediaError && <div className="reel-media-error">This post could not be loaded.</div>}
     {reel.status === "processing" && <div className="reel-processing-status" role="status"><span className="reel-processing-spinner"/>Preparing HD video...</div>}
     {reel.status === "failed" && <div className="reel-processing-status" role="status">Video processing failed.</div>}
@@ -227,6 +247,7 @@ function ShareSheet({ reel, shareUrl, onClose }) {
 
   const shareOnWhatsApp = () => {
     const message = ["A reel from Movora", reel.caption, shareUrl].filter(Boolean).join("\n");
+    recordSocialReelEvent(reel.id, { eventType:"share" }).catch(() => {});
     window.open(`https://wa.me/?text=${encodeURIComponent(message)}`, "_blank", "noopener,noreferrer");
   };
 
@@ -235,6 +256,7 @@ function ShareSheet({ reel, shareUrl, onClose }) {
       await navigator.clipboard.writeText(shareUrl);
       setFeedback("Post link copied.");
       setError("");
+      recordSocialReelEvent(reel.id, { eventType:"share" }).catch(() => {});
     } catch {
       setError("Clipboard access is unavailable. Copy the link from your browser address bar.");
     }
@@ -247,6 +269,7 @@ function ShareSheet({ reel, shareUrl, onClose }) {
     try {
       const message = [reel.caption || "Check out this Movora post", shareUrl].join("\n");
       await sendSocialMessage(friend.user_id, message);
+      await recordSocialReelEvent(reel.id, { eventType:"share" }).catch(() => {});
       setSentUserIds(current => new Set(current).add(friend.user_id));
     } catch (err) { setError(err.message || "Unable to share with this friend."); }
     finally { setSendingUserId(""); }

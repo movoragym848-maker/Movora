@@ -47,17 +47,19 @@ export async function getMyReelAnalytics(req, res, next) {
         (SELECT count(*)::int FROM social_reel_saves s WHERE s.reel_id = r.id) AS saves,
         (SELECT count(*)::int FROM social_reel_comments c WHERE c.reel_id = r.id) AS comments,
         (SELECT count(*)::int FROM social_reel_analytics_events e WHERE e.reel_id = r.id AND e.event_type = 'share') AS shares,
-        EXISTS (SELECT 1 FROM social_reel_likes l WHERE l.reel_id = r.id AND l.user_id = $2) AS liked,
-        EXISTS (SELECT 1 FROM social_reel_saves s WHERE s.reel_id = r.id AND s.user_id = $2) AS saved,
         COALESCE((SELECT round(avg(e.watch_ms))::int FROM social_reel_analytics_events e WHERE e.reel_id = r.id AND e.event_type = 'watch' AND e.actor_id <> r.creator_id), 0) AS average_watch_ms
       FROM social_reels r
       LEFT JOIN social_profiles p ON p.user_id = r.creator_id
       WHERE r.id = $1 AND r.creator_id = $2`, [req.params.reelId, userId]);
     if (!rows.length) return res.status(404).json({ message:"Post not found." });
 
-    const [impressions, retention, audience, comments] = await Promise.all([
+    const [impressions, retention, audience, commentVelocity, postComments] = await Promise.all([
       query(`WITH days AS (
-        SELECT generate_series(current_date - 13, current_date, interval '1 day')::date AS day
+        SELECT generate_series(
+          (SELECT created_at::date FROM social_reels WHERE id = $1),
+          current_date,
+          interval '1 day'
+        )::date AS day
       )
       SELECT days.day::text AS day,
         count(e.id) FILTER (WHERE e.event_type = 'impression')::int AS impressions,
@@ -85,11 +87,22 @@ export async function getMyReelAnalytics(req, res, next) {
       WHERE e.reel_id = $1 AND e.event_type = 'impression' AND e.actor_id <> r.creator_id
       GROUP BY audience`, [req.params.reelId]),
       query(`WITH days AS (
-        SELECT generate_series(current_date - 13, current_date, interval '1 day')::date AS day
+        SELECT generate_series(
+          (SELECT created_at::date FROM social_reels WHERE id = $1),
+          current_date,
+          interval '1 day'
+        )::date AS day
       )
       SELECT days.day::text AS day, count(c.id)::int AS comments
       FROM days LEFT JOIN social_reel_comments c ON c.reel_id = $1 AND c.created_at::date = days.day
       GROUP BY days.day ORDER BY days.day`, [req.params.reelId]),
+      query(`SELECT c.id, c.body, c.created_at, c.user_id,
+          COALESCE(p.display_name, 'Movora member') AS display_name, p.username, p.avatar_url
+        FROM social_reel_comments c
+        LEFT JOIN social_profiles p ON p.user_id = c.user_id
+        WHERE c.reel_id = $1
+        ORDER BY c.created_at DESC
+        LIMIT 100`, [req.params.reelId]),
     ]);
 
     const audienceCounts = { followers:0, nonFollowers:0 };
@@ -99,7 +112,8 @@ export async function getMyReelAnalytics(req, res, next) {
       impressions:impressions.rows,
       retention:retention.rows,
       audience:audienceCounts,
-      commentVelocity:comments.rows,
+      commentVelocity:commentVelocity.rows,
+      comments:postComments.rows,
     });
   } catch (err) { next(err); }
 }
