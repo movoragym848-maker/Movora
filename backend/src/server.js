@@ -140,17 +140,18 @@ app.use((err, _req, res, _next) => {
   res.status(500).json({ message: "Internal server error" });
 });
 
-app.listen(env.port, "0.0.0.0", async () => {
-  console.log(`Movora API running on http://localhost:${env.port}`);
+try {
+  await ensureGymStaffTable();
+  console.log("Gym staff table ready");
+  await ensureSocialTables();
+  console.log("Social tables ready");
+} catch (err) {
+  console.error("Failed to prepare database tables:", err);
+  process.exit(1);
+}
 
-  try {
-    await ensureGymStaffTable();
-    console.log("Gym staff table ready");
-    await ensureSocialTables();
-    console.log("Social tables ready");
-  } catch (err) {
-    console.error("Failed to prepare gym staff table:", err);
-  }
+app.listen(env.port, "0.0.0.0", () => {
+  console.log(`Movora API running on http://localhost:${env.port}`);
   
   // Clean up expired OTPs on startup
   cleanupExpiredOTPs().catch(err => console.error("Failed to cleanup OTPs:", err));
