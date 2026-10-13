@@ -22,8 +22,8 @@ export async function listMyReels(req, res, next) {
         r.media_type, r.workout_tag, r.location, r.privacy, r.status,
         p.username, p.display_name,
         (SELECT count(*)::int FROM social_reel_analytics_events e WHERE e.reel_id = r.id AND e.event_type = 'impression' AND e.actor_id <> r.creator_id) AS view_count,
-        (SELECT count(*)::int FROM social_reel_likes l WHERE l.reel_id = r.id) AS like_count,
-        (SELECT count(*)::int FROM social_reel_comments c WHERE c.reel_id = r.id) AS comment_count,
+        r.seed_like_count + (SELECT count(*)::int FROM social_reel_likes l WHERE l.reel_id = r.id) AS like_count,
+        r.seed_comment_count + (SELECT count(*)::int FROM social_reel_comments c WHERE c.reel_id = r.id) AS comment_count,
         (SELECT count(*)::int FROM social_reel_saves s WHERE s.reel_id = r.id) AS save_count
       FROM social_reels r
       LEFT JOIN social_profiles p ON p.user_id = r.creator_id
@@ -43,9 +43,9 @@ export async function getMyReelAnalytics(req, res, next) {
         p.username, p.display_name, p.avatar_url,
         (SELECT count(*)::int FROM social_reel_analytics_events e WHERE e.reel_id = r.id AND e.event_type = 'impression' AND e.actor_id <> r.creator_id) AS impressions,
         (SELECT count(DISTINCT e.actor_id)::int FROM social_reel_analytics_events e WHERE e.reel_id = r.id AND e.event_type = 'impression' AND e.actor_id <> r.creator_id) AS reach,
-        (SELECT count(*)::int FROM social_reel_likes l WHERE l.reel_id = r.id) AS likes,
+        r.seed_like_count + (SELECT count(*)::int FROM social_reel_likes l WHERE l.reel_id = r.id) AS likes,
         (SELECT count(*)::int FROM social_reel_saves s WHERE s.reel_id = r.id) AS saves,
-        (SELECT count(*)::int FROM social_reel_comments c WHERE c.reel_id = r.id) AS comments,
+        r.seed_comment_count + (SELECT count(*)::int FROM social_reel_comments c WHERE c.reel_id = r.id) AS comments,
         (SELECT count(*)::int FROM social_reel_analytics_events e WHERE e.reel_id = r.id AND e.event_type = 'share') AS shares,
         COALESCE((SELECT round(avg(e.watch_ms))::int FROM social_reel_analytics_events e WHERE e.reel_id = r.id AND e.event_type = 'watch' AND e.actor_id <> r.creator_id), 0) AS average_watch_ms
       FROM social_reels r

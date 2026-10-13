@@ -27,15 +27,18 @@ function ReelIcon({ type, filled = false }) {
   return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3m0 0L7.5 7.5M12 3l4.5 4.5M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6" fill="none" /></svg>;
 }
 
-function ReelCard({ reel, active, onLike, onComments, onShare }) {
+function ReelCard({ reel, feedIndex, active, preload, onLike, onComments, onShare }) {
   const [source, setSource] = useState(reel.video_url || "");
   const [mediaError, setMediaError] = useState(false);
   const [showLikeAnimation, setShowLikeAnimation] = useState(false);
   const [likeAnimationKey, setLikeAnimationKey] = useState(0);
   const videoRef = useRef(null);
+  const activeRef = useRef(active);
   const likeAnimationTimerRef = useRef(null);
   const videoClickTimerRef = useRef(null);
   const watchSampleRef = useRef({ currentTime:0, sentAt:0 });
+  const shouldMountMedia = active || preload;
+  activeRef.current = active;
 
   useEffect(() => {
     if (active) recordSocialReelEvent(reel.id, { eventType:"impression" }).catch(() => {});
@@ -87,43 +90,61 @@ function ReelCard({ reel, active, onLike, onComments, onShare }) {
 
   useEffect(() => {
     const video = videoRef.current;
-    if (!video || !source) return;
-    if (!active) {
-      video.pause();
-      return undefined;
-    }
-    if (!source.includes(".m3u8")) {
-      video.play().catch(() => {});
-      return undefined;
-    }
-    const session = JSON.parse(localStorage.getItem("rs_session") || "null");
-    const token = session?.accessToken;
+    if (!video || !source || !shouldMountMedia) return undefined;
     let cancelled = false;
     let hls;
     const attachStream = async () => {
-      const { default:Hls } = await import("hls.js");
-      if (cancelled) return;
-      if (!Hls.isSupported()) {
-        setMediaError(true);
+      if (!source.includes(".m3u8")) {
+        video.load();
         return;
       }
-      hls = new Hls({
-        startLevel:0,
-        capLevelToPlayerSize:true,
-        maxBufferLength:16,
-        maxMaxBufferLength:32,
-        xhrSetup(xhr) { if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`); },
-      });
-      hls.loadSource(source);
-      hls.attachMedia(video);
-      hls.on(Hls.Events.MANIFEST_PARSED, () => video.play().catch(() => {}));
-      hls.on(Hls.Events.ERROR, (_event, data) => {
-        if (data.fatal) setMediaError(true);
-      });
+      const { default:Hls } = await import("hls.js");
+      if (cancelled) return;
+      let token = "";
+      try { token = JSON.parse(localStorage.getItem("rs_session") || "null")?.accessToken || ""; }
+      catch { token = ""; }
+      const apiOrigin = new URL(resolveApiUrl("/"), window.location.href).origin;
+      const playlistOrigin = new URL(source, window.location.href).origin;
+      if (Hls.isSupported()) {
+        hls = new Hls({
+          startLevel:0,
+          capLevelToPlayerSize:true,
+          maxBufferLength:12,
+          maxMaxBufferLength:24,
+          xhrSetup(xhr) {
+            if (token && playlistOrigin === apiOrigin) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+          },
+        });
+        hls.loadSource(source);
+        hls.attachMedia(video);
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          if (activeRef.current) video.play().catch(() => {});
+        });
+        hls.on(Hls.Events.ERROR, (_event, data) => {
+          if (data.fatal) setMediaError(true);
+        });
+      } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
+        video.src = source;
+        video.load();
+        if (activeRef.current) video.play().catch(() => {});
+      } else {
+        setMediaError(true);
+      }
     };
     attachStream().catch(() => { if (!cancelled) setMediaError(true); });
-    return () => { cancelled = true; hls?.destroy(); };
-  }, [active, source]);
+    return () => {
+      cancelled = true;
+      video.pause();
+      hls?.destroy();
+    };
+  }, [shouldMountMedia, source]);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    if (active) video.play().catch(() => {});
+    else video.pause();
+  }, [active, shouldMountMedia, source]);
 
   useEffect(() => () => {
     if (likeAnimationTimerRef.current) window.clearTimeout(likeAnimationTimerRef.current);
@@ -165,10 +186,10 @@ function ReelCard({ reel, active, onLike, onComments, onShare }) {
   };
 
   const isImage = reel.media_type?.startsWith("image/");
-  return <article className="reel-page" data-reel-id={reel.id} onDoubleClick={likeWithAnimation}>
-    {source && (isImage
+  return <article className="reel-page" data-reel-id={reel.feedKey} data-feed-index={feedIndex} onDoubleClick={likeWithAnimation}>
+    {shouldMountMedia && source && (isImage
       ? <img className="reel-media" src={source} alt="" />
-      : <video ref={videoRef} className="reel-media" src={source.includes(".m3u8") ? undefined : source} playsInline loop muted preload="metadata" onClick={toggleVideoPlayback} onTimeUpdate={handleWatchTime} />)}
+      : <video ref={videoRef} className="reel-media" src={source.includes(".m3u8") ? undefined : source} poster={reel.thumbnail_url ? resolveApiUrl(reel.thumbnail_url) : undefined} playsInline loop muted preload={active ? "auto" : "metadata"} onClick={toggleVideoPlayback} onTimeUpdate={handleWatchTime} />)}
     {mediaError && <div className="reel-media-error">This post could not be loaded.</div>}
     {reel.status === "processing" && <div className="reel-processing-status" role="status"><span className="reel-processing-spinner"/>Preparing HD video...</div>}
     {reel.status === "failed" && <div className="reel-processing-status" role="status">Video processing failed.</div>}
@@ -353,7 +374,7 @@ export default function ReelsExperience({ onExit }) {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [feedError, setFeedError] = useState("");
-  const [activeReelId, setActiveReelId] = useState(null);
+  const [activeReelKey, setActiveReelKey] = useState(null);
   const [commentsReel, setCommentsReel] = useState(null);
   const [sharingReel, setSharingReel] = useState(null);
   const [cameraFacing, setCameraFacing] = useState("user");
@@ -391,6 +412,7 @@ export default function ReelsExperience({ onExit }) {
   const recordingCleanupRef = useRef(null);
   const recordingStartedRef = useRef(false);
   const loadingRef = useRef(false);
+  const nextFeedKeyRef = useRef(0);
   const previewUrlRef = useRef("");
 
   const currentFilter = filters.find(filter => filter.id === selectedFilter) || filters[0];
@@ -421,18 +443,19 @@ export default function ReelsExperience({ onExit }) {
       if (!nextCursor && sharedReelId) {
         const sharedReel = await getSocialReel(sharedReelId);
         const data = await getSocialReels();
-        const items = [sharedReel, ...data.items.filter(item => item.id !== sharedReel.id)];
+        const items = [sharedReel, ...data.items.filter(item => item.id !== sharedReel.id)]
+          .map(reel => ({ ...reel, feedKey:`${reel.id}:${nextFeedKeyRef.current++}` }));
         setReels(items);
         setCursor(data.nextCursor);
-        setActiveReelId(sharedReel.id);
+        setActiveReelKey(null);
         requestAnimationFrame(() => feedRef.current?.scrollTo({ top:0, behavior:"instant" }));
         return;
       }
       const data = await getSocialReels(nextCursor);
-      const items = data.items;
+      const items = data.items.map(reel => ({ ...reel, feedKey:`${reel.id}:${nextFeedKeyRef.current++}` }));
       setReels(current => nextCursor ? [...current, ...items] : items);
       setCursor(data.nextCursor);
-      if (!activeReelId && items[0]) setActiveReelId(items[0].id);
+      if (!nextCursor && items[0]) setActiveReelKey(items[0].feedKey);
     } catch (err) {
       const sharedReelId = new URLSearchParams(window.location.search).get("reel");
       if (!nextCursor && sharedReelId) setReels([]);
@@ -464,21 +487,27 @@ export default function ReelsExperience({ onExit }) {
   }, [pendingReelIds]);
 
   useEffect(() => {
-    if (view !== FEED_VIEW || !feedRef.current || !loadMoreRef.current) return undefined;
+    const root = feedRef.current;
+    if (view !== FEED_VIEW || !root || !cursor || reels.length < 3) return undefined;
+    const fetchTarget = root.querySelector(`[data-feed-index="${Math.max(0, reels.length - 3)}"]`);
+    if (!fetchTarget) return undefined;
+    // Fetch while two full-screen items remain, so the next batch is ready before the user reaches the end.
     const observer = new IntersectionObserver(entries => {
-      if (entries[0].isIntersecting && cursor && !loadingRef.current) loadPage(cursor);
-    }, { root:feedRef.current, rootMargin:"500px 0px" });
-    observer.observe(loadMoreRef.current);
+      if (entries.some(entry => entry.isIntersecting) && !loadingRef.current) loadPage(cursor);
+    }, { root, threshold:0.1 });
+    observer.observe(fetchTarget);
     return () => observer.disconnect();
   }, [cursor, loadingMore, reels.length, view]);
 
   useEffect(() => {
     const root = feedRef.current;
     if (view !== FEED_VIEW || !root) return undefined;
+    const visibility = new Map();
     const observer = new IntersectionObserver(entries => {
-      const current = entries.filter(entry => entry.isIntersecting).sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
-      if (current?.intersectionRatio > 0.55) setActiveReelId(current.target.dataset.reelId);
-    }, { root, threshold:[0.3, 0.55, 0.8] });
+      entries.forEach(entry => visibility.set(entry.target, entry.intersectionRatio));
+      const current = [...visibility.entries()].sort((a, b) => b[1] - a[1])[0];
+      setActiveReelKey(current?.[1] >= 0.8 ? current[0].dataset.reelId : null);
+    }, { root, threshold:[0, 0.8] });
     root.querySelectorAll("[data-reel-id]").forEach(node => observer.observe(node));
     return () => observer.disconnect();
   }, [reels, view]);
@@ -763,9 +792,10 @@ export default function ReelsExperience({ onExit }) {
         await uploadSocialReel(capturedMedia, { caption, workoutTag, location, privacy });
       }
       const data = await getSocialReels();
-      setReels(data.items);
+      const items = data.items.map(reel => ({ ...reel, feedKey:`${reel.id}:${nextFeedKeyRef.current++}` }));
+      setReels(items);
       setCursor(data.nextCursor);
-      setActiveReelId(data.items[0]?.id || null);
+      setActiveReelKey(null);
       setCaption("");
       setWorkoutTag("");
       setLocation("");
@@ -811,11 +841,12 @@ export default function ReelsExperience({ onExit }) {
   };
 
   const commentAdded = reelId => setReels(current => current.map(item => item.id === reelId ? { ...item, comment_count:(item.comment_count || 0) + 1 } : item));
+  const activeReelIndex = reels.findIndex(reel => reel.feedKey === activeReelKey);
 
   return <main className="reels-experience" data-view={view}>
     <div className="reels-feed" ref={feedRef} aria-label="Reels feed">
       {loading && <div className="reels-loading">Loading Reels...</div>}
-      {!loading && reels.map(reel => <ReelCard key={reel.id} reel={reel} active={view === FEED_VIEW && activeReelId === reel.id} onLike={toggleLike} onComments={setCommentsReel} onShare={shareReel}/>)}
+      {!loading && reels.map((reel, index) => <ReelCard key={reel.feedKey} reel={reel} feedIndex={index} active={view === FEED_VIEW && activeReelKey === reel.feedKey} preload={view === FEED_VIEW && index === activeReelIndex + 1} onLike={toggleLike} onComments={setCommentsReel} onShare={shareReel}/>)}
       {!loading && reels.length === 0 && <div className="reels-empty"><span className="reels-empty-mark">M</span><h1>Movora Reels</h1><p>Movement looks better in motion.</p><button type="button" onClick={() => setView(CAMERA_VIEW)}>Create the first post</button></div>}
       {feedError && view === FEED_VIEW && <div className="reels-feed-error" role="alert">{feedError}<button type="button" onClick={() => loadPage(null)}>Retry</button></div>}
       <div ref={loadMoreRef} className="reels-feed-end">{loadingMore ? "Loading more" : cursor ? "" : reels.length ? "You're all caught up" : ""}</div>

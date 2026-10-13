@@ -193,30 +193,69 @@ export async function toggleFollow(req, res, next) {
   } catch (err) { next(err); }
 }
 
+function encodeReelCursor(reel) {
+  return Buffer.from(JSON.stringify({ createdAt:reel.created_at, id:reel.id })).toString("base64url");
+}
+
+function decodeReelCursor(value) {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(Buffer.from(String(value), "base64url").toString("utf8"));
+    if (parsed.id && parsed.createdAt && !Number.isNaN(new Date(parsed.createdAt).getTime())) return parsed;
+  } catch {}
+  const legacyDate = new Date(value);
+  return Number.isNaN(legacyDate.getTime()) ? null : { createdAt:legacyDate.toISOString() };
+}
+
 export async function listReels(req, res, next) {
   try {
     const userId = authUser(req);
     if (!userId) return res.status(403).json({ message: "Social features are available for member accounts." });
-    const limit = Math.min(Math.max(Number(req.query.limit) || 8, 1), 20);
-    const cursor = req.query.cursor ? new Date(req.query.cursor) : null;
+    const limit = Math.min(Math.max(Number(req.query.limit) || 5, 1), 20);
+    const cursor = decodeReelCursor(req.query.cursor);
     const params = [userId];
-    const cursorFilter = cursor && !Number.isNaN(cursor.getTime()) ? `AND r.created_at < $${params.push(cursor.toISOString())}` : "";
+    let cursorFilter = "";
+    if (cursor?.id) {
+      params.push(cursor.createdAt, cursor.id);
+      cursorFilter = `AND (r.created_at, r.id) < ($${params.length - 1}::timestamptz, $${params.length}::uuid)`;
+    } else if (cursor?.createdAt) {
+      cursorFilter = `AND r.created_at < $${params.push(cursor.createdAt)}::timestamptz`;
+    }
     params.push(limit);
     const limitParam = `$${params.length}`;
-    const { rows } = await query(`
-      SELECT r.id, r.video_url, r.video_hls_url, r.status, r.thumbnail_url, r.caption, r.created_at,
-        r.media_type, r.workout_tag, r.location, r.privacy,
-        (SELECT count(*)::int FROM social_reel_likes l WHERE l.reel_id = r.id) AS like_count,
-        EXISTS (SELECT 1 FROM social_reel_likes l WHERE l.reel_id = r.id AND l.user_id = $1) AS liked,
-        (SELECT count(*)::int FROM social_reel_comments c WHERE c.reel_id = r.id) AS comment_count,
-        p.user_id, p.username, p.display_name, p.avatar_url
-      FROM social_reels r JOIN social_profiles p ON p.user_id = r.creator_id
-      WHERE (r.privacy = 'public' OR r.creator_id = $1 OR (r.privacy = 'friends' AND EXISTS (
+    const visibilityFilter = `(r.privacy = 'public' OR r.creator_id = $1 OR (r.privacy = 'friends' AND EXISTS (
         SELECT 1 FROM social_friend_requests f WHERE f.status = 'accepted' AND
           ((f.requester_id = $1 AND f.recipient_id = r.creator_id) OR (f.requester_id = r.creator_id AND f.recipient_id = $1))
-      ))) ${cursorFilter}
-      ORDER BY r.created_at DESC, r.id DESC LIMIT ${limitParam}`, params);
-    res.json({ items: rows, nextCursor: rows.length === limit ? rows[rows.length - 1].created_at : null });
+      )))`;
+    const selectReels = `
+      SELECT r.id, r.video_url, r.video_hls_url, r.status, r.thumbnail_url, r.caption, r.created_at,
+        r.media_type, r.workout_tag, r.location, r.privacy,
+        r.seed_like_count + (SELECT count(*)::int FROM social_reel_likes l WHERE l.reel_id = r.id) AS like_count,
+        EXISTS (SELECT 1 FROM social_reel_likes l WHERE l.reel_id = r.id AND l.user_id = $1) AS liked,
+        r.seed_comment_count + (SELECT count(*)::int FROM social_reel_comments c WHERE c.reel_id = r.id) AS comment_count,
+        p.user_id, p.username, p.display_name, p.avatar_url
+      FROM social_reels r JOIN social_profiles p ON p.user_id = r.creator_id
+      WHERE ${visibilityFilter}`;
+    const { rows } = await query(`${selectReels} ${cursorFilter} ORDER BY r.created_at DESC, r.id DESC LIMIT ${limitParam}`, params);
+
+    // On reaching the end, wrap to the newest visible items to keep the feed continuous.
+    if (rows.length < limit) {
+      const missing = limit - rows.length;
+      const seenIds = rows.map(reel => reel.id);
+      const { rows:wrappedRows } = await query(`${selectReels}
+        AND NOT (r.id = ANY($2::uuid[]))
+        ORDER BY r.created_at DESC, r.id DESC LIMIT $3`, [userId, seenIds, missing]);
+      rows.push(...wrappedRows);
+      if (rows.length < limit) {
+        const { rows:availableRows } = await query(`${selectReels} ORDER BY r.created_at DESC, r.id DESC LIMIT $2`, [userId, limit]);
+        for (let index = 0; rows.length < limit && availableRows.length; index += 1) {
+          rows.push(availableRows[index % availableRows.length]);
+        }
+      }
+    }
+
+    const lastReel = rows[rows.length - 1];
+    res.json({ items:rows, nextCursor:lastReel ? encodeReelCursor(lastReel) : null, has_more:Boolean(lastReel) });
   } catch (err) { next(err); }
 }
 
@@ -258,9 +297,9 @@ export async function getSocialReel(req, res, next) {
     if (!accessRows[0].can_view) return res.status(403).json({ message:"This Reel is limited by its privacy setting. Ask the creator to share it with your account." });
     const { rows } = await query(`SELECT r.id, r.video_url, r.video_hls_url, r.status, r.thumbnail_url, r.caption, r.created_at,
       r.media_type, r.workout_tag, r.location, r.privacy,
-        (SELECT count(*)::int FROM social_reel_likes l WHERE l.reel_id = r.id) AS like_count,
+        r.seed_like_count + (SELECT count(*)::int FROM social_reel_likes l WHERE l.reel_id = r.id) AS like_count,
         EXISTS (SELECT 1 FROM social_reel_likes l WHERE l.reel_id = r.id AND l.user_id = $2) AS liked,
-        (SELECT count(*)::int FROM social_reel_comments c WHERE c.reel_id = r.id) AS comment_count,
+        r.seed_comment_count + (SELECT count(*)::int FROM social_reel_comments c WHERE c.reel_id = r.id) AS comment_count,
         p.user_id, p.username, p.display_name, p.avatar_url
       FROM social_reels r JOIN social_profiles p ON p.user_id = r.creator_id WHERE r.id = $1`, [req.params.reelId, userId]);
     res.json(rows[0]);
@@ -321,7 +360,9 @@ export async function toggleReelLike(req, res, next) {
     const removed = await query("DELETE FROM social_reel_likes WHERE reel_id = $1 AND user_id = $2 RETURNING reel_id", [req.params.reelId, userId]);
     const liked = !removed.rowCount;
     if (liked) await query("INSERT INTO social_reel_likes (reel_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING", [req.params.reelId, userId]);
-    const { rows } = await query("SELECT count(*)::int AS like_count FROM social_reel_likes WHERE reel_id = $1", [req.params.reelId]);
+    const { rows } = await query(`SELECT r.seed_like_count +
+      (SELECT count(*)::int FROM social_reel_likes WHERE reel_id = r.id) AS like_count
+      FROM social_reels r WHERE r.id = $1`, [req.params.reelId]);
     res.json({ liked, like_count:rows[0].like_count });
   } catch (err) { next(err); }
 }
