@@ -182,7 +182,7 @@ export const getFriendRequests = () => request("/social/requests");
 export const sendFriendRequest = userId => request(`/social/users/${encodeURIComponent(userId)}/request`, { method:"POST" });
 export const respondToFriendRequest = (requestId, status) => request(`/social/requests/${encodeURIComponent(requestId)}/respond`, { method:"POST", body:JSON.stringify({ status }) });
 export const toggleSocialFollow = userId => request(`/social/users/${encodeURIComponent(userId)}/follow`, { method:"POST" });
-export const getSocialReels = cursor => request(`/social/reels?limit=8${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`);
+export const getSocialReels = cursor => request(`/reels/feed?limit=5${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`);
 export const getSocialReelUploadLimits = () => request("/social/reels/upload-limits");
 export const getSocialReel = reelId => request(`/social/reels/${encodeURIComponent(reelId)}`);
 export const getMySocialReels = () => request("/social/my/reels");
