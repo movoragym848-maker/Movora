@@ -1,6 +1,6 @@
 const API_URL = (import.meta.env?.VITE_API_URL || "https://sincere-transformation-production-b923.up.railway.app/api").trim().replace(/\/+$/, "");
 export const resolveApiUrl = path => {
-  if (!path || /^https?:\/\//i.test(path)) return path;
+  if (!path || /^(?:https?:|data:|blob:)/i.test(path)) return path;
   const apiPath = path.startsWith("/api/") ? path.slice(4) : path.startsWith("/") ? path : `/${path}`;
   return `${API_URL}${apiPath}`;
 };

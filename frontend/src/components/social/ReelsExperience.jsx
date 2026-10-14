@@ -33,6 +33,7 @@ function ReelCard({ reel, feedIndex, active, preload, onLike, onComments, onShar
   const [showLikeAnimation, setShowLikeAnimation] = useState(false);
   const [likeAnimationKey, setLikeAnimationKey] = useState(0);
   const videoRef = useRef(null);
+  const mediaUrlRef = useRef("");
   const activeRef = useRef(active);
   const likeAnimationTimerRef = useRef(null);
   const videoClickTimerRef = useRef(null);
@@ -75,18 +76,26 @@ function ReelCard({ reel, feedIndex, active, preload, onLike, onComments, onShar
       setSource(reel.video_url || "");
       return undefined;
     }
+    if (mediaUrlRef.current) {
+      setSource(mediaUrlRef.current);
+      return undefined;
+    }
+    if (!active && !preload) return undefined;
     setSource("");
-    if (!active) return undefined;
     getSocialReelMedia(reel.id).then(blob => {
       if (cancelled) return;
       objectUrl = URL.createObjectURL(blob);
+      mediaUrlRef.current = objectUrl;
       setSource(objectUrl);
     }).catch(() => { if (!cancelled) setMediaError(true); });
     return () => {
       cancelled = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [active, reel.id, reel.media_type, reel.status, reel.video_hls_url, reel.video_url]);
+  }, [active, preload, reel.id, reel.media_type, reel.status, reel.video_hls_url, reel.video_url]);
+
+  useEffect(() => () => {
+    if (mediaUrlRef.current) URL.revokeObjectURL(mediaUrlRef.current);
+  }, []);
 
   useEffect(() => {
     const video = videoRef.current;
