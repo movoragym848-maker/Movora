@@ -90,10 +90,12 @@ async function ensureSocialTables() {
   await query("ALTER TABLE social_reels ADD COLUMN IF NOT EXISTS location text NOT NULL DEFAULT ''");
   await query("ALTER TABLE social_reels ADD COLUMN IF NOT EXISTS privacy text NOT NULL DEFAULT 'public'");
   await query("ALTER TABLE social_reels ADD COLUMN IF NOT EXISTS raw_object_key text");
-  await query("ALTER TABLE social_reels ADD COLUMN IF NOT EXISTS processing_error text");
-  await query("CREATE INDEX IF NOT EXISTS idx_social_reels_status_created ON social_reels(status, created_at DESC)");
   await query("ALTER TABLE social_reels ADD COLUMN IF NOT EXISTS video_hls_url text");
   await query("ALTER TABLE social_reels ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'ready'");
+  await query("ALTER TABLE social_reels ADD COLUMN IF NOT EXISTS processing_error text");
+  await query("ALTER TABLE social_reels ADD COLUMN IF NOT EXISTS seed_like_count integer NOT NULL DEFAULT 0");
+  await query("ALTER TABLE social_reels ADD COLUMN IF NOT EXISTS seed_comment_count integer NOT NULL DEFAULT 0");
+  await query("CREATE INDEX IF NOT EXISTS idx_social_reels_status_created ON social_reels(status, created_at DESC)");
   await query(`CREATE TABLE IF NOT EXISTS social_reel_likes (
     reel_id uuid NOT NULL REFERENCES social_reels(id) ON DELETE CASCADE,
     user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
