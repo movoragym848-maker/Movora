@@ -21,7 +21,7 @@ For a protected deployment, pass the current access token with `accessToken`. Th
 From the repository root, install the backend dependencies and start FastAPI:
 
 ```powershell
-py -m pip install -r backend/requirements-seed.txt
+py -m pip install -r backend/requirements.txt
 py -m uvicorn main:app --app-dir backend --host 0.0.0.0 --port 8000
 ```
 
