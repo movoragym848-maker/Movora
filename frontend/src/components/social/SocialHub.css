@@ -103,6 +103,30 @@
 .call-screen-error { width:min(100%, 520px); box-sizing:border-box; padding:10px 12px; border:1px solid rgba(255,180,180,.35); border-radius:10px; background:rgba(121,24,35,.72); color:#ffd9d9; white-space:pre-wrap; overflow-wrap:anywhere; font-size:11px; line-height:1.4; }
 @keyframes call-screen-in { from { opacity:0; transform:scale(1.015); } to { opacity:1; transform:scale(1); } }
 @media (max-width: 640px) { .call-screen { padding-left:16px; padding-right:16px; }.call-screen-person h2 { font-size:29px; }.call-control { min-width:0; padding:0 10px; }.call-screen-person.video-connected-person { top:calc(14px + env(safe-area-inset-top)); left:14px; } }
+.message-composer { align-items:center; }
+.message-file-input { display:none; }
+.message-composer .message-attach-button { flex:0 0 38px; width:38px; background:#eaf3ff; color:#3182e8; font-size:24px; line-height:1; }
+.message-composer button:disabled { opacity:.55; cursor:wait; }
+.message-attachment-preview { display:flex; align-items:center; gap:9px; min-width:0; padding:8px 12px; border-top:1px solid #e5edf5; background:#fff; color:#637d93; font-size:12px; }
+.message-attachment-preview img { width:48px; height:48px; border-radius:8px; object-fit:cover; }
+.message-attachment-preview span { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.message-attachment-preview button { width:30px; height:30px; border:0; border-radius:50%; background:#edf4fb; color:#526b80; font-size:20px; cursor:pointer; }
+.message-attachment-preview button:disabled { opacity:.55; cursor:wait; }
+.message-send-error { margin:0 12px; }
+.attachment-size-overlay { position:fixed; inset:0; z-index:1200; display:grid; place-items:center; box-sizing:border-box; padding:24px; background:rgba(12,28,46,.48); backdrop-filter:blur(5px); }
+.attachment-size-dialog { display:grid; justify-items:center; width:min(100%, 350px); box-sizing:border-box; padding:26px 22px 22px; border:1px solid #e4edf6; border-radius:22px; background:#fff; box-shadow:0 22px 70px rgba(14,45,78,.28); color:#18324d; text-align:center; }
+.attachment-size-icon { display:grid; place-items:center; width:54px; height:54px; border-radius:18px; background:#fff3e8; color:#d97706; font-size:30px; font-weight:800; }
+.attachment-size-dialog h2 { margin:15px 0 7px; font-family:'Barlow Condensed',sans-serif; font-size:27px; }
+.attachment-size-dialog p { margin:0; color:#637d93; font-size:14px; line-height:1.5; overflow-wrap:anywhere; }
+.attachment-size-limit { display:flex; justify-content:space-between; width:100%; box-sizing:border-box; margin:19px 0; padding:12px 14px; border:1px solid #e5edf5; border-radius:12px; background:#f7faff; color:#637d93; font-size:13px; }
+.attachment-size-limit strong { color:#18324d; }
+.attachment-size-dialog > button { width:100%; min-height:46px; border:0; border-radius:13px; background:#3182e8; color:#fff; font:700 15px 'Barlow',sans-serif; cursor:pointer; }
+.message-image-button { display:block; max-width:min(260px, 100%); border:0; border-radius:10px; padding:0; overflow:hidden; background:transparent; cursor:zoom-in; }
+.message-attachment-image { display:block; max-width:100%; max-height:320px; object-fit:cover; border-radius:10px; }
+.message-image-loading,.message-image-error { display:block; padding:14px 4px; color:#91a3b6; font-size:12px; }
+.message-image-viewer { position:fixed; inset:0; z-index:1000; display:grid; place-items:center; padding:24px; background:rgba(6,14,24,.88); }
+.message-image-viewer img { display:block; max-width:100%; max-height:calc(100dvh - 48px); object-fit:contain; border-radius:10px; }
+.message-image-viewer > button { position:absolute; top:calc(12px + env(safe-area-inset-top)); right:14px; width:42px; height:42px; border:1px solid rgba(255,255,255,.5); border-radius:50%; background:rgba(0,0,0,.25); color:#fff; font-size:28px; cursor:pointer; }
 .typing-indicator { align-self:flex-start; display:flex; align-items:center; gap:7px; min-height:54px; padding:2px 12px 2px 6px; border-radius:15px 15px 15px 4px; background:#edf4fb; }
 .typing-scene { position:relative; flex:0 0 94px; width:94px; height:60px; overflow:hidden; zoom:.85; }
 .teddy { position:absolute; inset:0; }

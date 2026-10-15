@@ -54,6 +54,19 @@ async function ensureSocialTables() {
     sender_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE, body text NOT NULL CHECK (char_length(body) BETWEEN 1 AND 2000),
     created_at timestamptz NOT NULL DEFAULT now(), read_at timestamptz
   )`);
+  await query(`ALTER TABLE social_messages
+    ADD COLUMN IF NOT EXISTS media_data bytea,
+    ADD COLUMN IF NOT EXISTS media_type text,
+    ADD COLUMN IF NOT EXISTS media_name text`);
+  await query("ALTER TABLE social_messages ALTER COLUMN body SET DEFAULT ''");
+  await query("ALTER TABLE social_messages DROP CONSTRAINT IF EXISTS social_messages_body_check");
+  await query(`DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint
+      WHERE conname = 'social_messages_content_check' AND conrelid = 'social_messages'::regclass) THEN
+      ALTER TABLE social_messages ADD CONSTRAINT social_messages_content_check
+        CHECK (char_length(body) <= 2000 AND (char_length(body) > 0 OR media_data IS NOT NULL));
+    END IF;
+  END $$`);
   await query(`CREATE TABLE IF NOT EXISTS social_call_signals (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     sender_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -163,9 +176,15 @@ app.use(express.json({ limit: "1mb" }));
 
 app.use("/api", routes);
 
-app.use((err, _req, res, _next) => {
+app.use((err, req, res, _next) => {
   console.error(err);
-  if (err.type === "entity.too.large") return res.status(413).json({ message: "Post media must be 20 MB or smaller." });
+  if (err.type === "entity.too.large") {
+    const isMessageImage = req.path.endsWith("/messages/image");
+    const message = isMessageImage
+      ? "Message images are limited to 50 MB."
+      : "Media upload exceeds the server's configured size limit.";
+    return res.status(413).json({ message });
+  }
   if (err.name === "ZodError") return res.status(400).json({ message: "Invalid request", issues: err.issues });
   res.status(500).json({ message: "Internal server error" });
 });

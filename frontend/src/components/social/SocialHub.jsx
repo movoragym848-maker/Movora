@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Capacitor } from "@capacitor/core";
 import { C } from "../../constants/data";
-import { getCallSignals, getFriendRequests, getSocialConversations, getSocialMessages, getSocialNotes, getSocialProfile, getSocialTyping, respondToFriendRequest, saveSocialNote, saveSocialProfile, searchSocialProfiles, sendCallSignal, sendFriendRequest, sendSocialMessage, setSocialTyping, toggleSocialFollow } from "../../services/api";
+import { getCallSignals, getFriendRequests, getSocialConversations, getSocialMessages, getSocialMessageImage, getSocialNotes, getSocialProfile, getSocialTyping, respondToFriendRequest, saveSocialNote, saveSocialProfile, searchSocialProfiles, sendCallSignal, sendFriendRequest, sendSocialImageMessage, sendSocialMessage, setSocialTyping, toggleSocialFollow } from "../../services/api";
 import "./SocialHub.css";
 import ReelsExperience from "./ReelsExperience";
 
@@ -9,6 +9,12 @@ const CallAudio = Capacitor.registerPlugin("CallAudio");
 
 const usernamePattern = /^[a-z0-9._]{3,30}$/;
 const NOTE_TTL_MS = 25 * 60 * 60 * 1000;
+const MAX_MESSAGE_IMAGE_BYTES = 50 * 1024 * 1024;
+const MESSAGE_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
+
+function formatFileSize(bytes) {
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 function initials(name) {
   return (name || "Movora").split(" ").map(part => part[0]).join("").slice(0, 2).toUpperCase();
@@ -339,6 +345,42 @@ export function CallPanel({ person, onError, incomingOnly = false }) {
   </div>;
 }
 
+function MessageImage({ conversationId, message, previewUrl, onOpen }) {
+  const [imageUrl, setImageUrl] = useState(previewUrl || "");
+  const [imageError, setImageError] = useState(false);
+
+  useEffect(() => {
+    if (previewUrl) {
+      setImageUrl(previewUrl);
+      setImageError(false);
+      return undefined;
+    }
+    if (message.pending) {
+      setImageUrl("");
+      return undefined;
+    }
+    let active = true;
+    let objectUrl = "";
+    getSocialMessageImage(conversationId, message.id)
+      .then(blob => {
+        if (!active) return;
+        objectUrl = URL.createObjectURL(blob);
+        setImageUrl(objectUrl);
+      })
+      .catch(() => { if (active) setImageError(true); });
+    return () => {
+      active = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [conversationId, message.id, previewUrl]);
+
+  if (imageError) return <span className="message-image-error">Photo unavailable</span>;
+  if (!imageUrl) return <span className="message-image-loading">Loading photo…</span>;
+  return <button type="button" className="message-image-button" onClick={() => onOpen(imageUrl, message.media_name || "Photo")} aria-label="Open photo">
+    <img className="message-attachment-image" src={imageUrl} alt={message.media_name || "Photo attachment"} />
+  </button>;
+}
+
 function Messages({ profile }) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
@@ -347,6 +389,11 @@ function Messages({ profile }) {
   const [messages, setMessages] = useState([]);
   const [otherTyping, setOtherTyping] = useState(false);
   const [body, setBody] = useState("");
+  const [attachment, setAttachment] = useState(null);
+  const [attachmentPreview, setAttachmentPreview] = useState("");
+  const [attachmentSizeError, setAttachmentSizeError] = useState("");
+  const [sending, setSending] = useState(false);
+  const [expandedImage, setExpandedImage] = useState(null);
   const [error, setError] = useState("");
   const [requests, setRequests] = useState({ incoming:[], outgoing:[] });
   const [requestsOpen, setRequestsOpen] = useState(false);
@@ -359,10 +406,20 @@ function Messages({ profile }) {
   const noteInputRef = useRef(null);
   const messageHistoryRef = useRef(null);
   const messageInputRef = useRef(null);
+  const attachmentInputRef = useRef(null);
   const shouldScrollToLatestRef = useRef(true);
   const typingUserRef = useRef(null);
   const typingHeartbeatRef = useRef(null);
   const typingTimeoutRef = useRef(null);
+  useEffect(() => {
+    if (!attachment) {
+      setAttachmentPreview("");
+      return undefined;
+    }
+    const objectUrl = URL.createObjectURL(attachment);
+    setAttachmentPreview(objectUrl);
+    return () => URL.revokeObjectURL(objectUrl);
+  }, [attachment]);
   const refreshConversations = () => getSocialConversations().then(setConversations).catch(err => setError(`${err.message} (${err.status || "network"})`));
   useEffect(() => { refreshConversations(); }, []);
   const refreshRequests = () => getFriendRequests().then(setRequests).catch(err => setError(err.message));
@@ -427,6 +484,8 @@ function Messages({ profile }) {
   useEffect(() => {
     shouldScrollToLatestRef.current = true;
     setOtherTyping(false);
+    setExpandedImage(null);
+    setAttachment(null);
   }, [selected?.user_id]);
   useEffect(() => () => {
     if (typingHeartbeatRef.current) window.clearInterval(typingHeartbeatRef.current);
@@ -506,23 +565,58 @@ function Messages({ profile }) {
   const send = async event => {
     event.preventDefault();
     const text = body.trim();
-    if (!text || !selected) return;
+    const image = attachment;
+    if ((!text && !image) || !selected || sending) return;
     const pendingId = `pending-${Date.now()}`;
-    const pendingMessage = { id:pendingId, sender_id:profile.user_id, body:text, created_at:new Date().toISOString(), pending:true };
+    const pendingMessage = {
+      id:pendingId,
+      sender_id:profile.user_id,
+      body:text,
+      media_type:image?.type,
+      media_name:image?.name,
+      localPreviewUrl:image ? attachmentPreview : "",
+      created_at:new Date().toISOString(),
+      pending:true,
+    };
+    setSending(true);
     setMessages(current => [...current, pendingMessage]);
     setBody("");
     stopTyping();
     window.requestAnimationFrame(() => messageInputRef.current?.focus());
     setError("");
     try {
-      const data = await sendSocialMessage(selected.user_id, text);
+      const data = image
+        ? await sendSocialImageMessage(selected.user_id, image, text)
+        : await sendSocialMessage(selected.user_id, text);
       setMessages(current => current.map(message => message.id === pendingId ? data.message : message));
-      setSelected(current => ({ ...current, id:data.conversationId, newChat:false }));
+      setSelected(current => current?.user_id === selected.user_id
+        ? { ...current, id:data.conversationId, newChat:false }
+        : current);
+      setAttachment(null);
       refreshConversations();
     } catch (err) {
       setMessages(current => current.filter(message => message.id !== pendingId));
+      setBody(text);
       setError(err.message);
+    } finally {
+      setSending(false);
     }
+  };
+  const chooseAttachment = event => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    if (!MESSAGE_IMAGE_TYPES.has(file.type)) {
+      setError("Choose a JPEG, PNG, WebP, or GIF photo.");
+      return;
+    }
+    if (file.size > MAX_MESSAGE_IMAGE_BYTES) {
+      setAttachmentSizeError(`This photo is ${formatFileSize(file.size)}. Choose a photo smaller than 50 MB to send it.`);
+      return;
+    }
+    setAttachmentSizeError("");
+    setError("");
+    setAttachment(file);
   };
   const openNote = () => { setNoteDraft(note); setNoteOpen(true); };
   const saveNote = async () => {
@@ -535,6 +629,15 @@ function Messages({ profile }) {
     } catch (err) { setError(err.message || "Unable to save your note."); }
   };
   return <div className="social-messages">
+    {attachmentSizeError && <div className="attachment-size-overlay" role="presentation" onClick={() => setAttachmentSizeError("")}>
+      <section className="attachment-size-dialog" role="alertdialog" aria-modal="true" aria-labelledby="attachment-size-title" aria-describedby="attachment-size-description" onClick={event => event.stopPropagation()}>
+        <span className="attachment-size-icon" aria-hidden="true">!</span>
+        <h2 id="attachment-size-title">Photo is too large</h2>
+        <p id="attachment-size-description">{attachmentSizeError}</p>
+        <div className="attachment-size-limit"><span>Maximum photo size</span><strong>50 MB</strong></div>
+        <button type="button" autoFocus onClick={() => setAttachmentSizeError("")}>Got it</button>
+      </section>
+    </div>}
     <div className="messages-heading"><div><h1>Messages</h1><p>Train together, stay connected.</p></div><div className="messages-heading-actions">{noteOpen && <button type="button" className="note-save-action" onClick={saveNote}>Done</button>}<button type="button" className="requests-button" onClick={() => setRequestsOpen(current => !current)} aria-expanded={requestsOpen}>Requests{requests.incoming.filter(request => request.status === "pending").length > 0 && <span>{requests.incoming.filter(request => request.status === "pending").length}</span>}</button></div></div>
     {requestsOpen && <div className="requests-panel"><div className="requests-panel-heading"><strong>Friend requests</strong><button type="button" onClick={() => setRequestsOpen(false)} aria-label="Close friend requests">×</button></div>{requests.incoming.length > 0 ? <div className="request-group"><div className="request-label">Incoming</div>{requests.incoming.map(request => <div className="request-row" key={request.id}><Avatar name={request.display_name} src={request.avatar_url} size={38}/><div className="person-copy"><strong>{request.display_name}</strong><span>@{request.username}</span></div>{request.status === "pending" ? <button type="button" className="request-accept" disabled={requestAction === request.id} onClick={() => respondToRequest(request.id, "accepted", request.user_id)}>{requestAction === request.id ? "Accepting..." : "Accept"}</button> : <span className="request-pending">Accepted</span>}{request.following ? <span className="request-pending">Following</span> : <button type="button" className="request-accept" disabled={requestAction === request.user_id} onClick={() => followBack(request.user_id)}>{requestAction === request.user_id ? "Following..." : "Follow back"}</button>}</div>)}</div> : <p className="requests-empty">No incoming requests.</p>}{requests.outgoing.length > 0 && <div className="request-group"><div className="request-label">Sent</div>{requests.outgoing.map(request => <div className="request-row" key={request.id}><Avatar name={request.display_name} src={request.avatar_url} size={38}/><div className="person-copy"><strong>{request.display_name}</strong><span>@{request.username}</span></div><span className="request-pending">{request.status === "accepted" ? "Accepted" : "Pending"}</span></div>)}</div>}</div>}
     <div className="messages-search"><div className="search-field"><span aria-hidden="true">⌕</span><input id="people-search" aria-label="Search by username or name" value={query} onChange={e => setQuery(e.target.value)} placeholder="Search by @username or name" /></div></div>
@@ -544,12 +647,35 @@ function Messages({ profile }) {
     </div>
     {noteOpen && <div className="note-overlay"><div className="note-composer" role="dialog" aria-label="Write your note"><div className="discover-avatar discover-note"><span>✦</span></div><input ref={noteInputRef} className="note-input" value={noteDraft} onChange={event => setNoteDraft(event.target.value.slice(0, 80))} maxLength={80} placeholder="What are you up to?" aria-label="Your note" /></div></div>}
     {selectedNote && <div className="note-overlay" onClick={() => setSelectedNote(null)}><div className="note-viewer" role="dialog" aria-label={`${selectedNote.display_name}'s note`} onClick={event => event.stopPropagation()}><Avatar name={selectedNote.display_name} src={selectedNote.avatar_url} size={76}/><strong>{selectedNote.display_name}</strong><p>{selectedNote.text}</p><button type="button" onClick={() => setSelectedNote(null)}>Close</button></div></div>}
-    {error && <div role="alert" className="messages-error">{error}</div>}
+    {error && !attachment && <div role="alert" className="messages-error">{error}</div>}
     {results.length > 0 && <div className="people-results"><div className="section-label">People</div>{results.map(user => <div className="person-result" key={user.user_id}><Avatar name={user.display_name} src={user.avatar_url} size={46}/><div className="person-copy"><strong>{user.display_name}</strong><span>@{user.username} · {user.followers} followers</span></div>{user.request_status === "accepted" ? <button type="button" className="message-button" onClick={() => chooseUser(user)}>Message</button> : user.request_status === "outgoing_pending" ? <span className="request-pending">Requested</span> : user.request_status === "incoming_pending" ? <button type="button" className="request-accept" onClick={() => refreshRequests().then(() => setRequestsOpen(true))}>Review request</button> : <button type="button" className="message-button" onClick={() => requestUser(user)}>Add friend</button>}</div>)}</div>}
     <div className={`inbox-layout${selected ? " has-selection" : ""}`}>
       <section className="conversation-list"><div className="inbox-title"><h2>Chats</h2><span>{chatRows.length || ""}</span></div>{chatRows.length === 0 ? <div className="empty-chats"><span>○</span><p>Your conversations will appear here.</p><small>Search above to find a training partner.</small></div> : chatRows.map((chat, index) => <button className={`conversation-row${selected?.user_id === chat.user_id ? " active" : ""}`} key={chat.id || chat.user_id || index} type="button" onClick={() => { setMessages([]); setSelected({ ...chat, user_id:chat.user_id, newChat:!chat.id }); }}><Avatar name={chat.display_name} src={chat.avatar_url} size={50}/><span className="conversation-copy"><strong>{chat.display_name}</strong><small>@{chat.username}</small></span><span className="conversation-arrow">›</span></button>)}</section>
-      {selected && <section className="conversation-panel"><div className="conversation-header"><button className="back-button" type="button" onClick={() => setSelected(null)} aria-label="Back to chats">‹</button><Avatar name={selected.display_name} src={selected.avatar_url} size={42}/><div><strong>{selected.display_name}</strong><small>@{selected.username}</small></div></div><CallPanel person={selected} onError={setError}/><div className="message-history" ref={messageHistoryRef}>{messages.length === 0 && <div className="new-conversation">Start a conversation with <strong>{selected.display_name}</strong>.</div>}{messages.map(message => <div className={`message-bubble${message.sender_id === profile.user_id ? " mine" : ""}`} key={message.id}>{message.body}</div>)}{otherTyping && <div className="typing-indicator" role="status" aria-label={`${selected.display_name} is typing`}><div className="typing-scene" aria-hidden="true"><div className="teddy"><span className="teddy-ear teddy-ear-left"/><span className="teddy-ear teddy-ear-right"/><span className="teddy-head"><i className="teddy-eye teddy-eye-left"/><i className="teddy-eye teddy-eye-right"/><i className="teddy-muzzle"/><i className="teddy-nose"/></span><span className="teddy-body"/><span className="teddy-leg teddy-leg-left"/><span className="teddy-leg teddy-leg-right"/><span className="teddy-arm teddy-arm-left"/><span className="teddy-arm teddy-arm-right"/></div><div className="teddy-laptop"><span className="laptop-screen"><i/><i/><i/></span><span className="laptop-base"/></div></div><span className="typing-caption">typing</span></div>}</div><form onSubmit={send} className="message-composer"><input ref={messageInputRef} value={body} onChange={e => updateDraft(e.target.value)} placeholder="Write a message..." aria-label="Write a message"/><button type="submit" aria-label="Send message">↑</button></form></section>}
+      {selected && <section className="conversation-panel">
+        <div className="conversation-header"><button className="back-button" type="button" onClick={() => setSelected(null)} aria-label="Back to chats">‹</button><Avatar name={selected.display_name} src={selected.avatar_url} size={42}/><div><strong>{selected.display_name}</strong><small>@{selected.username}</small></div></div>
+        <CallPanel person={selected} onError={setError}/>
+        <div className="message-history" ref={messageHistoryRef}>
+          {messages.length === 0 && <div className="new-conversation">Start a conversation with <strong>{selected.display_name}</strong>.</div>}
+          {messages.map(message => <div className={`message-bubble${message.sender_id === profile.user_id ? " mine" : ""}`} key={message.id}>
+            {message.media_type?.startsWith("image/") && <MessageImage conversationId={selected.id} message={message} previewUrl={message.localPreviewUrl} onOpen={(src, name) => setExpandedImage({ src, name })}/>}
+            {!!message.body && <MessageBody body={message.body}/>}
+          </div>)}
+          {otherTyping && <div className="typing-indicator" role="status" aria-label={`${selected.display_name} is typing`}><div className="typing-scene" aria-hidden="true"><div className="teddy"><span className="teddy-ear teddy-ear-left"/><span className="teddy-ear teddy-ear-right"/><span className="teddy-head"><i className="teddy-eye teddy-eye-left"/><i className="teddy-eye teddy-eye-right"/><i className="teddy-muzzle"/><i className="teddy-nose"/></span><span className="teddy-body"/><span className="teddy-leg teddy-leg-left"/><span className="teddy-leg teddy-leg-right"/><span className="teddy-arm teddy-arm-left"/><span className="teddy-arm teddy-arm-right"/></div><div className="teddy-laptop"><span className="laptop-screen"><i/><i/><i/></span><span className="laptop-base"/></div></div><span className="typing-caption">typing</span></div>}
+        </div>
+        {attachment && <div className="message-attachment-preview"><img src={attachmentPreview} alt="Selected photo preview"/><span>{sending ? "Sending photo..." : attachment.name}</span><button type="button" onClick={() => setAttachment(null)} aria-label="Remove attached photo" disabled={sending}>×</button></div>}
+        {error && attachment && <div role="alert" className="messages-error message-send-error">{error}</div>}
+        <form onSubmit={send} className="message-composer">
+          <input ref={attachmentInputRef} className="message-file-input" type="file" accept="image/jpeg,image/png,image/webp,image/gif" onChange={chooseAttachment} aria-label="Choose a photo"/>
+          <button type="button" className="message-attach-button" onClick={() => attachmentInputRef.current?.click()} disabled={sending} aria-label="Attach a photo">＋</button>
+          <input ref={messageInputRef} value={body} onChange={e => updateDraft(e.target.value)} placeholder="Write a message..." aria-label="Write a message"/>
+          <button type="submit" aria-label={sending ? "Sending message" : "Send message"} disabled={sending || (!body.trim() && !attachment)}>{sending ? "…" : "↑"}</button>
+        </form>
+      </section>}
     </div>
+    {expandedImage && <div className="message-image-viewer" role="dialog" aria-modal="true" aria-label={expandedImage.name} onClick={() => setExpandedImage(null)}>
+      <button type="button" onClick={() => setExpandedImage(null)} aria-label="Close photo">×</button>
+      <img src={expandedImage.src} alt={expandedImage.name} onClick={event => event.stopPropagation()}/>
+    </div>}
   </div>;
 }
 

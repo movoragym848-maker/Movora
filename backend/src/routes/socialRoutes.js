@@ -1,6 +1,6 @@
 import express, { Router } from "express";
 import { requireAuth } from "../middleware/auth.js";
-import { addSocialReelComment, createReel, createUploadedReel, getSocialNotes, getSocialProfile, getSocialReel, getSocialReelComments, getSocialReelMedia, getSocialReelUploadLimits, getTypingStatus, listCallSignals, listConversations, listFriendRequests, listMessages, listReels, maxReelMediaBytes, pinSocialReelComment, respondToFriendRequest, saveSocialNote, saveSocialProfile, searchSocialProfiles, sendCallSignal, sendFriendRequest, sendMessage, setTypingStatus, toggleFollow, toggleReelLike } from "../controllers/socialController.js";
+import { addSocialReelComment, createReel, createUploadedReel, getMessageImage, getSocialNotes, getSocialProfile, getSocialReel, getSocialReelComments, getSocialReelMedia, getSocialReelUploadLimits, getTypingStatus, listCallSignals, listConversations, listFriendRequests, listMessages, listReels, maxMessageImageBytes, maxReelMediaBytes, pinSocialReelComment, respondToFriendRequest, saveSocialNote, saveSocialProfile, searchSocialProfiles, sendCallSignal, sendFriendRequest, sendImageMessage, sendMessage, setTypingStatus, toggleFollow, toggleReelLike } from "../controllers/socialController.js";
 import { deleteMyReel, getMyReelAnalytics, listMyReels, recordMyReelEvent, toggleMyReelSave, updateMyReelPrivacy } from "../controllers/reelAnalyticsController.js";
 
 export const socialRoutes = Router();
@@ -32,8 +32,10 @@ socialRoutes.post("/reels/:reelId/comments", addSocialReelComment);
 socialRoutes.put("/reels/:reelId/comments/:commentId/pin", pinSocialReelComment);
 socialRoutes.get("/conversations", listConversations);
 socialRoutes.get("/conversations/:conversationId/messages", listMessages);
+socialRoutes.get("/conversations/:conversationId/messages/:messageId/image", getMessageImage);
 socialRoutes.get("/conversations/:conversationId/typing", getTypingStatus);
 socialRoutes.post("/users/:userId/typing", setTypingStatus);
 socialRoutes.post("/users/:userId/messages", sendMessage);
+socialRoutes.post("/users/:userId/messages/image", express.raw({ type:["image/jpeg", "image/png", "image/webp", "image/gif"], limit:maxMessageImageBytes }), sendImageMessage);
 socialRoutes.get("/calls/signals", listCallSignals);
 socialRoutes.post("/users/:userId/calls/signals", sendCallSignal);

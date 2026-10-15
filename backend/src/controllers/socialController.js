@@ -8,6 +8,7 @@ const profileSchema = z.object({
   avatarUrl: z.string().url().max(2000).nullable().optional(),
 });
 const messageSchema = z.object({ body: z.string().trim().min(1).max(2000) });
+const optionalMessageSchema = z.object({ body: z.string().trim().max(2000).optional().default("") });
 const reelSchema = z.object({ videoUrl: z.string().url().max(2000), thumbnailUrl: z.string().url().max(2000).nullable().optional(), caption: z.string().max(220).optional().default(""), workoutTag:z.string().max(40).optional().default(""), location:z.string().max(100).optional().default(""), privacy:z.enum(["public", "friends", "private"]).optional().default("public") });
 const callSignalSchema = z.object({ type: z.enum(["offer", "answer", "candidate", "hangup"]), payload: z.record(z.any()).default({}) });
 const noteSchema = z.object({ text: z.string().trim().min(1).max(80) });
@@ -468,8 +469,73 @@ export async function listMessages(req, res, next) {
         AND ((r.requester_id = $2 AND r.recipient_id = CASE WHEN c.participant_a = $2 THEN c.participant_b ELSE c.participant_a END)
           OR (r.requester_id = CASE WHEN c.participant_a = $2 THEN c.participant_b ELSE c.participant_a END AND r.recipient_id = $2)))`, [req.params.conversationId, userId]);
     if (!conversation.rowCount) return res.status(404).json({ message: "Conversation not found." });
-    const { rows } = await query("SELECT id, sender_id, body, created_at, read_at FROM social_messages WHERE conversation_id = $1 ORDER BY created_at ASC LIMIT 100", [req.params.conversationId]);
+    const { rows } = await query("SELECT id, sender_id, body, media_type, media_name, created_at, read_at FROM social_messages WHERE conversation_id = $1 ORDER BY created_at ASC LIMIT 100", [req.params.conversationId]);
     res.json(rows);
+  } catch (err) { next(err); }
+}
+
+export const maxMessageImageBytes = 50 * 1024 * 1024;
+const messageImageTypes = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
+
+function hasValidImageSignature(buffer, contentType) {
+  if (contentType === "image/jpeg") return buffer.subarray(0, 3).equals(Buffer.from([0xff, 0xd8, 0xff]));
+  if (contentType === "image/png") return buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+  if (contentType === "image/webp") return buffer.toString("ascii", 0, 4) === "RIFF" && buffer.toString("ascii", 8, 12) === "WEBP";
+  if (contentType === "image/gif") return ["GIF87a", "GIF89a"].includes(buffer.toString("ascii", 0, 6));
+  return false;
+}
+
+function decodeHeader(value) {
+  try { return decodeURIComponent(value || ""); }
+  catch { return ""; }
+}
+
+export async function sendImageMessage(req, res, next) {
+  try {
+    const userId = authUser(req);
+    if (!userId) return res.status(403).json({ message:"Social features are available for member accounts." });
+    const mediaType = String(req.get("Content-Type") || "").split(";")[0].trim().toLowerCase();
+    if (!messageImageTypes.has(mediaType)) return res.status(415).json({ message:"Choose a JPEG, PNG, WebP, or GIF image." });
+    if (!Buffer.isBuffer(req.body) || req.body.length === 0) return res.status(400).json({ message:"Choose an image to send." });
+    if (req.body.length > maxMessageImageBytes) return res.status(413).json({ message:"Message images are limited to 50 MB." });
+    if (!hasValidImageSignature(req.body, mediaType)) return res.status(415).json({ message:"The selected file is not a valid supported image." });
+
+    const input = optionalMessageSchema.parse({ body:decodeHeader(req.get("X-Message-Body")) });
+    const conversationId = await getConversation(userId, req.params.userId);
+    if (!conversationId) return res.status(403).json({ message:"You can message this person after they accept your friend request." });
+    const rawName = decodeHeader(req.get("X-File-Name")) || "photo";
+    const mediaName = rawName.replace(/[\\/\\x00-\\x1f\\x7f]/g, "_").slice(-160) || "photo";
+    const { rows } = await query(`INSERT INTO social_messages
+      (conversation_id, sender_id, body, media_data, media_type, media_name)
+      VALUES ($1, $2, $3, $4, $5, $6)
+      RETURNING id, sender_id, body, media_type, media_name, created_at, read_at`,
+    [conversationId, userId, input.body, req.body, mediaType, mediaName]);
+    res.status(201).json({ conversationId, message:rows[0] });
+  } catch (err) {
+    if (err instanceof z.ZodError) return res.status(400).json({ message:"Message text must be 2000 characters or fewer." });
+    next(err);
+  }
+}
+
+export async function getMessageImage(req, res, next) {
+  try {
+    const userId = authUser(req);
+    if (!userId) return res.status(403).json({ message:"Social features are available for member accounts." });
+    const { rows } = await query(`SELECT m.media_data, m.media_type
+      FROM social_messages m
+      JOIN social_conversations c ON c.id = m.conversation_id
+      WHERE m.id = $1 AND c.id = $2 AND (c.participant_a = $3 OR c.participant_b = $3)
+        AND EXISTS (SELECT 1 FROM social_friend_requests f WHERE f.status = 'accepted'
+          AND ((f.requester_id = $3 AND f.recipient_id = CASE WHEN c.participant_a = $3 THEN c.participant_b ELSE c.participant_a END)
+            OR (f.requester_id = CASE WHEN c.participant_a = $3 THEN c.participant_b ELSE c.participant_a END AND f.recipient_id = $3)))`,
+    [req.params.messageId, req.params.conversationId, userId]);
+    if (!rows[0]?.media_data) return res.status(404).json({ message:"Message image not found." });
+    res.set("Content-Type", rows[0].media_type);
+    res.set("Content-Length", String(rows[0].media_data.length));
+    res.set("Content-Disposition", "inline");
+    res.set("Cache-Control", "private, no-store");
+    res.set("X-Content-Type-Options", "nosniff");
+    res.send(rows[0].media_data);
   } catch (err) { next(err); }
 }
 
