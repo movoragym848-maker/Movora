@@ -180,8 +180,11 @@ app.use((err, req, res, _next) => {
   console.error(err);
   if (err.type === "entity.too.large") {
     const isMessageImage = req.path.endsWith("/messages/image");
+    const isMessageAudio = req.path.endsWith("/messages/audio");
     const message = isMessageImage
       ? "Message images are limited to 50 MB."
+      : isMessageAudio
+        ? "Voice notes are limited to 5 MB."
       : "Media upload exceeds the server's configured size limit.";
     return res.status(413).json({ message });
   }

@@ -106,6 +106,24 @@
 .message-composer { align-items:center; }
 .message-file-input { display:none; }
 .message-composer .message-attach-button { flex:0 0 38px; width:38px; background:#eaf3ff; color:#3182e8; font-size:24px; line-height:1; }
+.message-composer .message-mic-button { flex:0 0 38px; width:38px; background:#eaf3ff; color:#3182e8; }
+.message-mic-button svg { width:20px; height:20px; fill:none; stroke:currentColor; stroke-linecap:round; stroke-linejoin:round; stroke-width:1.8; vertical-align:middle; }
+.voice-recording-wrap { display:grid; gap:6px; margin:0 12px; }
+.voice-recording-status { display:flex; align-items:center; gap:14px; min-height:68px; box-sizing:border-box; padding:10px 16px; border-radius:36px; background:#3182e8; color:#fff; box-shadow:0 8px 20px rgba(49,130,232,.2); }
+.voice-recording-stop { display:grid; flex:0 0 34px; place-items:center; width:34px; height:34px; border:0; border-radius:10px; background:transparent; cursor:pointer; }
+.voice-recording-stop span { width:17px; height:17px; border-radius:3px; background:#fff; }
+.voice-waveform { display:flex; flex:1; align-items:center; justify-content:center; gap:4px; height:36px; min-width:0; overflow:hidden; }
+.voice-waveform i { flex:0 1 4px; min-width:2px; max-height:100%; border-radius:4px; background:#fff; opacity:.96; transition:height 70ms ease-out; }
+.voice-recording-time { flex:0 0 auto; min-width:44px; color:#fff; font-size:16px; font-variant-numeric:tabular-nums; text-align:right; }
+.voice-recording-capacity { display:flex; align-items:center; gap:8px; padding:0 14px; }
+.voice-recording-capacity > span { flex:1; height:3px; overflow:hidden; border-radius:2px; background:#dceafb; }
+.voice-recording-capacity > span i { display:block; height:100%; border-radius:inherit; background:#3182e8; transition:width .15s linear; }
+.voice-recording-capacity small { color:#8398b0; font-size:10px; font-variant-numeric:tabular-nums; white-space:nowrap; }
+.voice-recording-draft { display:flex; align-items:center; gap:9px; min-width:0; margin:0 12px; padding:8px 12px; border:1px solid #d6e7f8; border-radius:14px; background:#f3f8ff; }
+.voice-recording-draft audio { flex:1; width:0; min-width:0; height:38px; }
+.voice-recording-draft span { color:#637d93; font-size:11px; white-space:nowrap; }
+.voice-recording-draft button { flex:0 0 30px; width:30px; height:30px; border:0; border-radius:50%; background:#e2efff; color:#3182e8; font-size:20px; cursor:pointer; }
+.message-audio-player { display:block; width:min(260px, 100%); max-width:100%; height:40px; }
 .message-composer button:disabled { opacity:.55; cursor:wait; }
 .message-attachment-preview { display:flex; align-items:center; gap:9px; min-width:0; padding:8px 12px; border-top:1px solid #e5edf5; background:#fff; color:#637d93; font-size:12px; }
 .message-attachment-preview img { width:48px; height:48px; border-radius:8px; object-fit:cover; }

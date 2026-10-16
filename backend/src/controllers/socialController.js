@@ -449,7 +449,10 @@ export async function listConversations(req, res, next) {
         m.body AS last_message, m.created_at AS last_message_at
       FROM social_conversations c
       JOIN social_profiles p ON p.user_id = CASE WHEN c.participant_a = $1 THEN c.participant_b ELSE c.participant_a END
-      LEFT JOIN LATERAL (SELECT body, created_at FROM social_messages WHERE conversation_id = c.id ORDER BY created_at DESC LIMIT 1) m ON true
+      LEFT JOIN LATERAL (
+        SELECT COALESCE(NULLIF(body, ''), CASE WHEN media_type LIKE 'audio/%' THEN 'Voice note' WHEN media_type LIKE 'image/%' THEN 'Photo' END) AS body, created_at
+        FROM social_messages WHERE conversation_id = c.id ORDER BY created_at DESC LIMIT 1
+      ) m ON true
       WHERE (c.participant_a = $1 OR c.participant_b = $1)
         AND EXISTS (SELECT 1 FROM social_friend_requests r WHERE r.status = 'accepted'
           AND ((r.requester_id = $1 AND r.recipient_id = CASE WHEN c.participant_a = $1 THEN c.participant_b ELSE c.participant_a END)
@@ -476,6 +479,8 @@ export async function listMessages(req, res, next) {
 
 export const maxMessageImageBytes = 50 * 1024 * 1024;
 const messageImageTypes = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
+export const maxMessageAudioBytes = 5 * 1024 * 1024;
+const messageAudioTypes = new Set(["audio/webm", "audio/ogg", "audio/mp4", "audio/mpeg"]);
 
 function hasValidImageSignature(buffer, contentType) {
   if (contentType === "image/jpeg") return buffer.subarray(0, 3).equals(Buffer.from([0xff, 0xd8, 0xff]));
@@ -517,7 +522,43 @@ export async function sendImageMessage(req, res, next) {
   }
 }
 
-export async function getMessageImage(req, res, next) {
+function hasValidAudioSignature(buffer, contentType) {
+  if (contentType === "audio/webm") return buffer.subarray(0, 4).equals(Buffer.from([0x1a, 0x45, 0xdf, 0xa3]));
+  if (contentType === "audio/ogg") return buffer.toString("ascii", 0, 4) === "OggS";
+  if (contentType === "audio/mp4") return buffer.toString("ascii", 4, 8) === "ftyp";
+  if (contentType === "audio/mpeg") return buffer.subarray(0, 3).equals(Buffer.from("ID3"))
+    || (buffer[0] === 0xff && (buffer[1] & 0xe0) === 0xe0);
+  return false;
+}
+
+export async function sendAudioMessage(req, res, next) {
+  try {
+    const userId = authUser(req);
+    if (!userId) return res.status(403).json({ message:"Social features are available for member accounts." });
+    const mediaType = String(req.get("Content-Type") || "").split(";")[0].trim().toLowerCase();
+    if (!messageAudioTypes.has(mediaType)) return res.status(415).json({ message:"Record a supported voice note in WebM, Ogg, MP4, or MPEG format." });
+    if (!Buffer.isBuffer(req.body) || req.body.length === 0) return res.status(400).json({ message:"Record a voice note before sending." });
+    if (req.body.length > maxMessageAudioBytes) return res.status(413).json({ message:"Voice notes are limited to 5 MB." });
+    if (!hasValidAudioSignature(req.body, mediaType)) return res.status(415).json({ message:"The recording is not a valid supported audio file." });
+
+    const input = optionalMessageSchema.parse({ body:decodeHeader(req.get("X-Message-Body")) });
+    const conversationId = await getConversation(userId, req.params.userId);
+    if (!conversationId) return res.status(403).json({ message:"You can message this person after they accept your friend request." });
+    const rawName = decodeHeader(req.get("X-File-Name")) || "voice-note";
+    const mediaName = rawName.replace(/[\\/\\x00-\\x1f\\x7f]/g, "_").slice(-160) || "voice-note";
+    const { rows } = await query(`INSERT INTO social_messages
+      (conversation_id, sender_id, body, media_data, media_type, media_name)
+      VALUES ($1, $2, $3, $4, $5, $6)
+      RETURNING id, sender_id, body, media_type, media_name, created_at, read_at`,
+    [conversationId, userId, input.body, req.body, mediaType, mediaName]);
+    res.status(201).json({ conversationId, message:rows[0] });
+  } catch (err) {
+    if (err instanceof z.ZodError) return res.status(400).json({ message:"Message text must be 2000 characters or fewer." });
+    next(err);
+  }
+}
+
+async function getMessageMedia(req, res, next, expectedType, mediaLabel) {
   try {
     const userId = authUser(req);
     if (!userId) return res.status(403).json({ message:"Social features are available for member accounts." });
@@ -529,7 +570,7 @@ export async function getMessageImage(req, res, next) {
           AND ((f.requester_id = $3 AND f.recipient_id = CASE WHEN c.participant_a = $3 THEN c.participant_b ELSE c.participant_a END)
             OR (f.requester_id = CASE WHEN c.participant_a = $3 THEN c.participant_b ELSE c.participant_a END AND f.recipient_id = $3)))`,
     [req.params.messageId, req.params.conversationId, userId]);
-    if (!rows[0]?.media_data) return res.status(404).json({ message:"Message image not found." });
+    if (!rows[0]?.media_data || !rows[0].media_type?.startsWith(expectedType)) return res.status(404).json({ message:`Message ${mediaLabel} not found.` });
     res.set("Content-Type", rows[0].media_type);
     res.set("Content-Length", String(rows[0].media_data.length));
     res.set("Content-Disposition", "inline");
@@ -538,6 +579,9 @@ export async function getMessageImage(req, res, next) {
     res.send(rows[0].media_data);
   } catch (err) { next(err); }
 }
+
+export const getMessageImage = (req, res, next) => getMessageMedia(req, res, next, "image/", "image");
+export const getMessageAudio = (req, res, next) => getMessageMedia(req, res, next, "audio/", "audio");
 
 export async function getTypingStatus(req, res, next) {
   try {

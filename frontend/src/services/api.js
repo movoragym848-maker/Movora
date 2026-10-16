@@ -229,6 +229,7 @@ export const setSocialReelCommentPinned = (reelId, commentId, pinned) => request
 export const getSocialConversations = () => request("/social/conversations");
 export const getSocialMessages = conversationId => request(`/social/conversations/${encodeURIComponent(conversationId)}/messages`);
 export const getSocialMessageImage = (conversationId, messageId) => requestBlob(`/social/conversations/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(messageId)}/image`);
+export const getSocialMessageAudio = (conversationId, messageId) => requestBlob(`/social/conversations/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(messageId)}/audio`);
 export const getSocialTyping = conversationId => request(`/social/conversations/${encodeURIComponent(conversationId)}/typing`);
 export const setSocialTyping = (userId, typing) => request(`/social/users/${encodeURIComponent(userId)}/typing`, { method:"POST", body:JSON.stringify({ typing }) });
 export const sendSocialMessage = (userId, body) => request(`/social/users/${encodeURIComponent(userId)}/messages`, { method:"POST", body:JSON.stringify({ body }) });
@@ -238,6 +239,15 @@ export const sendSocialImageMessage = (userId, image, body = "") => request(`/so
   headers:{
     "Content-Type":image.type,
     "X-File-Name":encodeURIComponent(image.name),
+    "X-Message-Body":encodeURIComponent(body),
+  },
+});
+export const sendSocialAudioMessage = (userId, audio, body = "") => request(`/social/users/${encodeURIComponent(userId)}/messages/audio`, {
+  method:"POST",
+  body:audio,
+  headers:{
+    "Content-Type":audio.type,
+    "X-File-Name":encodeURIComponent(audio.name || "voice-note"),
     "X-Message-Body":encodeURIComponent(body),
   },
 });

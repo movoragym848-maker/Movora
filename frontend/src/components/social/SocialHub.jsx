@@ -1,15 +1,17 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Capacitor } from "@capacitor/core";
 import { C } from "../../constants/data";
-import { getCallSignals, getFriendRequests, getSocialConversations, getSocialMessages, getSocialMessageImage, getSocialNotes, getSocialProfile, getSocialTyping, respondToFriendRequest, saveSocialNote, saveSocialProfile, searchSocialProfiles, sendCallSignal, sendFriendRequest, sendSocialImageMessage, sendSocialMessage, setSocialTyping, toggleSocialFollow } from "../../services/api";
+import { getCallSignals, getFriendRequests, getSocialConversations, getSocialMessages, getSocialMessageAudio, getSocialMessageImage, getSocialNotes, getSocialProfile, getSocialTyping, respondToFriendRequest, saveSocialNote, saveSocialProfile, searchSocialProfiles, sendCallSignal, sendFriendRequest, sendSocialAudioMessage, sendSocialImageMessage, sendSocialMessage, setSocialTyping, toggleSocialFollow } from "../../services/api";
 import "./SocialHub.css";
 import ReelsExperience from "./ReelsExperience";
+import { ReelsStateProvider } from "./ReelsState";
 
 const CallAudio = Capacitor.registerPlugin("CallAudio");
 
 const usernamePattern = /^[a-z0-9._]{3,30}$/;
 const NOTE_TTL_MS = 25 * 60 * 60 * 1000;
 const MAX_MESSAGE_IMAGE_BYTES = 50 * 1024 * 1024;
+const MAX_MESSAGE_AUDIO_BYTES = 5 * 1024 * 1024;
 const MESSAGE_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
 
 function formatFileSize(bytes) {
@@ -381,6 +383,39 @@ function MessageImage({ conversationId, message, previewUrl, onOpen }) {
   </button>;
 }
 
+function MessageAudio({ conversationId, message, previewBlob }) {
+  const [audioUrl, setAudioUrl] = useState("");
+  const [audioError, setAudioError] = useState(false);
+  useEffect(() => {
+    if (previewBlob) {
+      const objectUrl = URL.createObjectURL(previewBlob);
+      setAudioUrl(objectUrl);
+      setAudioError(false);
+      return () => URL.revokeObjectURL(objectUrl);
+    }
+    if (message.pending) {
+      setAudioUrl("");
+      return undefined;
+    }
+    let active = true;
+    let objectUrl = "";
+    getSocialMessageAudio(conversationId, message.id)
+      .then(blob => {
+        if (!active) return;
+        objectUrl = URL.createObjectURL(blob);
+        setAudioUrl(objectUrl);
+      })
+      .catch(() => { if (active) setAudioError(true); });
+    return () => {
+      active = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [conversationId, message.id, message.pending, previewBlob]);
+  if (audioError) return <span className="message-image-error">Voice note unavailable</span>;
+  if (!audioUrl) return <span className="message-image-loading">Loading voice note…</span>;
+  return <audio className="message-audio-player" controls preload="metadata" src={audioUrl} aria-label="Voice note" />;
+}
+
 function Messages({ profile }) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
@@ -393,6 +428,12 @@ function Messages({ profile }) {
   const [attachmentPreview, setAttachmentPreview] = useState("");
   const [attachmentSizeError, setAttachmentSizeError] = useState("");
   const [sending, setSending] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingBytes, setRecordingBytes] = useState(0);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const [waveformLevels, setWaveformLevels] = useState(Array(32).fill(8));
+  const [recordingDraft, setRecordingDraft] = useState(null);
+  const [recordingDraftUrl, setRecordingDraftUrl] = useState("");
   const [expandedImage, setExpandedImage] = useState(null);
   const [error, setError] = useState("");
   const [requests, setRequests] = useState({ incoming:[], outgoing:[] });
@@ -407,6 +448,19 @@ function Messages({ profile }) {
   const messageHistoryRef = useRef(null);
   const messageInputRef = useRef(null);
   const attachmentInputRef = useRef(null);
+  const mediaRecorderRef = useRef(null);
+  const recordingStreamRef = useRef(null);
+  const recordingChunksRef = useRef([]);
+  const recordingBytesRef = useRef(0);
+  const recordingStartedAtRef = useRef(0);
+  const recordingTimerRef = useRef(null);
+  const waveformTimerRef = useRef(null);
+  const audioContextRef = useRef(null);
+  const analyserRef = useRef(null);
+  const recordingHoldRef = useRef(false);
+  const recordingCancelledRef = useRef(false);
+  const recordingLimitReachedRef = useRef(false);
+  const sendRecordingOnStopRef = useRef(false);
   const shouldScrollToLatestRef = useRef(true);
   const typingUserRef = useRef(null);
   const typingHeartbeatRef = useRef(null);
@@ -420,6 +474,15 @@ function Messages({ profile }) {
     setAttachmentPreview(objectUrl);
     return () => URL.revokeObjectURL(objectUrl);
   }, [attachment]);
+  useEffect(() => {
+    if (!recordingDraft) {
+      setRecordingDraftUrl("");
+      return undefined;
+    }
+    const objectUrl = URL.createObjectURL(recordingDraft.blob);
+    setRecordingDraftUrl(objectUrl);
+    return () => URL.revokeObjectURL(objectUrl);
+  }, [recordingDraft]);
   const refreshConversations = () => getSocialConversations().then(setConversations).catch(err => setError(`${err.message} (${err.status || "network"})`));
   useEffect(() => { refreshConversations(); }, []);
   const refreshRequests = () => getFriendRequests().then(setRequests).catch(err => setError(err.message));
@@ -486,8 +549,16 @@ function Messages({ profile }) {
     setOtherTyping(false);
     setExpandedImage(null);
     setAttachment(null);
+    setRecordingDraft(null);
   }, [selected?.user_id]);
   useEffect(() => () => {
+    recordingHoldRef.current = false;
+    recordingCancelledRef.current = true;
+    if (recordingTimerRef.current) window.clearInterval(recordingTimerRef.current);
+    if (waveformTimerRef.current) window.clearInterval(waveformTimerRef.current);
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") mediaRecorderRef.current.stop();
+    recordingStreamRef.current?.getTracks().forEach(track => track.stop());
+    audioContextRef.current?.close().catch(() => {});
     if (typingHeartbeatRef.current) window.clearInterval(typingHeartbeatRef.current);
     if (typingTimeoutRef.current) window.clearTimeout(typingTimeoutRef.current);
     const userId = typingUserRef.current;
@@ -564,6 +635,16 @@ function Messages({ profile }) {
   };
   const send = async event => {
     event.preventDefault();
+    if (recordingHoldRef.current) {
+      sendRecordingOnStopRef.current = true;
+      stopVoiceRecording();
+      return;
+    }
+    if (recordingDraft) {
+      const draft = recordingDraft;
+      await sendVoiceNote(draft.blob, draft.mediaType);
+      return;
+    }
     const text = body.trim();
     const image = attachment;
     if ((!text && !image) || !selected || sending) return;
@@ -600,6 +681,164 @@ function Messages({ profile }) {
       setError(err.message);
     } finally {
       setSending(false);
+    }
+  };
+  const sendVoiceNote = async (audioBlob, mediaType) => {
+    if (!selected) return;
+    const text = body.trim();
+    const audio = new File([audioBlob], `voice-note.${mediaType.includes("ogg") ? "ogg" : mediaType.includes("mp4") ? "m4a" : "webm"}`, { type:mediaType });
+    const pendingId = `pending-${Date.now()}`;
+    const pendingMessage = {
+      id:pendingId,
+      sender_id:profile.user_id,
+      body:text,
+      media_type:mediaType,
+      media_name:audio.name,
+      localAudioBlob:audio,
+      created_at:new Date().toISOString(),
+      pending:true,
+    };
+    setSending(true);
+    setMessages(current => [...current, pendingMessage]);
+    setBody("");
+    stopTyping();
+    setError("");
+    try {
+      const data = await sendSocialAudioMessage(selected.user_id, audio, text);
+      setMessages(current => current.map(message => message.id === pendingId ? data.message : message));
+      setRecordingDraft(null);
+      setSelected(current => current?.user_id === selected.user_id
+        ? { ...current, id:data.conversationId, newChat:false }
+        : current);
+      refreshConversations();
+    } catch (err) {
+      setMessages(current => current.filter(message => message.id !== pendingId));
+      setBody(text);
+      setRecordingDraft({ blob:audio, mediaType });
+      setError(err.status === 404
+        ? "Voice notes are not enabled on the current server yet. Deploy the backend audio-message route, then try sending again."
+        : err.message);
+    } finally {
+      setSending(false);
+    }
+  };
+  const clearRecordingResources = () => {
+    if (recordingTimerRef.current) window.clearInterval(recordingTimerRef.current);
+    if (waveformTimerRef.current) window.clearInterval(waveformTimerRef.current);
+    recordingTimerRef.current = null;
+    waveformTimerRef.current = null;
+    recordingStreamRef.current?.getTracks().forEach(track => track.stop());
+    recordingStreamRef.current = null;
+    audioContextRef.current?.close().catch(() => {});
+    audioContextRef.current = null;
+    analyserRef.current = null;
+    mediaRecorderRef.current = null;
+    setWaveformLevels(Array(32).fill(8));
+    setIsRecording(false);
+  };
+  const stopVoiceRecording = (cancelled = false) => {
+    recordingHoldRef.current = false;
+    recordingCancelledRef.current = cancelled;
+    const recorder = mediaRecorderRef.current;
+    if (recorder && recorder.state !== "inactive") recorder.stop();
+  };
+  const startVoiceRecording = async event => {
+    event.preventDefault();
+    if (sending || attachment || recordingDraft || !selected || recordingHoldRef.current || isRecording) return;
+    if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
+      setError("Voice recording is not supported by this browser or device.");
+      return;
+    }
+    recordingHoldRef.current = true;
+    recordingCancelledRef.current = false;
+    recordingLimitReachedRef.current = false;
+    sendRecordingOnStopRef.current = false;
+    recordingChunksRef.current = [];
+    recordingBytesRef.current = 0;
+    setRecordingBytes(0);
+    setRecordingSeconds(0);
+    setWaveformLevels(Array(32).fill(8));
+    setError("");
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio:true });
+      if (!recordingHoldRef.current) {
+        stream.getTracks().forEach(track => track.stop());
+        return;
+      }
+      recordingStreamRef.current = stream;
+      const preferredMimeType = ["audio/webm;codecs=opus", "audio/ogg;codecs=opus", "audio/mp4"]
+        .find(type => MediaRecorder.isTypeSupported(type));
+      const recorder = new MediaRecorder(stream, {
+        ...(preferredMimeType ? { mimeType:preferredMimeType } : {}),
+        audioBitsPerSecond:48000,
+      });
+      mediaRecorderRef.current = recorder;
+      recordingStartedAtRef.current = Date.now();
+      const AudioContextConstructor = window.AudioContext || window.webkitAudioContext;
+      if (AudioContextConstructor) {
+        const audioContext = new AudioContextConstructor();
+        const analyser = audioContext.createAnalyser();
+        analyser.fftSize = 128;
+        audioContext.createMediaStreamSource(stream).connect(analyser);
+        if (audioContext.state === "suspended") void audioContext.resume();
+        audioContextRef.current = audioContext;
+        analyserRef.current = analyser;
+        const frequencyData = new Uint8Array(analyser.frequencyBinCount);
+        waveformTimerRef.current = window.setInterval(() => {
+          analyser.getByteFrequencyData(frequencyData);
+          const bars = Array.from({ length:32 }, (_, index) => {
+            const start = Math.floor(index * frequencyData.length / 32);
+            const end = Math.max(start + 1, Math.floor((index + 1) * frequencyData.length / 32));
+            const average = frequencyData.slice(start, end).reduce((sum, value) => sum + value, 0) / (end - start);
+            return Math.max(8, Math.round(8 + average * 0.72));
+          });
+          setWaveformLevels(bars);
+        }, 70);
+      }
+      recorder.addEventListener("dataavailable", recordingEvent => {
+        if (!recordingEvent.data.size) return;
+        if (recordingBytesRef.current + recordingEvent.data.size > MAX_MESSAGE_AUDIO_BYTES) {
+          recordingLimitReachedRef.current = true;
+          recordingHoldRef.current = false;
+          if (recorder.state !== "inactive") recorder.stop();
+          return;
+        }
+        recordingChunksRef.current.push(recordingEvent.data);
+        recordingBytesRef.current += recordingEvent.data.size;
+        setRecordingBytes(recordingBytesRef.current);
+        if (recordingBytesRef.current >= MAX_MESSAGE_AUDIO_BYTES) {
+          recordingLimitReachedRef.current = true;
+          recordingHoldRef.current = false;
+          if (recorder.state !== "inactive") recorder.stop();
+        }
+      });
+      recorder.addEventListener("stop", () => {
+        const wasCancelled = recordingCancelledRef.current;
+        const shouldSend = sendRecordingOnStopRef.current;
+        sendRecordingOnStopRef.current = false;
+        const finalType = recorder.mimeType || recordingChunksRef.current[0]?.type || "audio/webm";
+        const audioBlob = new Blob(recordingChunksRef.current, { type:finalType });
+        clearRecordingResources();
+        if (wasCancelled) return;
+        if (recordingLimitReachedRef.current && audioBlob.size === 0) {
+          setError("The voice note reached the 5 MB limit before a recording could be saved.");
+          return;
+        }
+        if (audioBlob.size > 0) {
+          const mediaType = finalType.split(";")[0];
+          if (shouldSend) void sendVoiceNote(audioBlob, mediaType);
+          else setRecordingDraft({ blob:audioBlob, mediaType });
+        }
+      });
+      recorder.start(250);
+      setIsRecording(true);
+      recordingTimerRef.current = window.setInterval(() => {
+        setRecordingSeconds(Math.floor((Date.now() - recordingStartedAtRef.current) / 1000));
+      }, 250);
+    } catch (recordingError) {
+      recordingHoldRef.current = false;
+      clearRecordingResources();
+      setError(recordingError.message || "Unable to access the microphone. Check your browser permissions and try again.");
     }
   };
   const chooseAttachment = event => {
@@ -658,17 +897,35 @@ function Messages({ profile }) {
           {messages.length === 0 && <div className="new-conversation">Start a conversation with <strong>{selected.display_name}</strong>.</div>}
           {messages.map(message => <div className={`message-bubble${message.sender_id === profile.user_id ? " mine" : ""}`} key={message.id}>
             {message.media_type?.startsWith("image/") && <MessageImage conversationId={selected.id} message={message} previewUrl={message.localPreviewUrl} onOpen={(src, name) => setExpandedImage({ src, name })}/>}
-            {!!message.body && <MessageBody body={message.body}/>}
+                {message.media_type?.startsWith("audio/") && <MessageAudio conversationId={selected.id} message={message} previewBlob={message.localAudioBlob}/>}
+                {!!message.body && <MessageBody body={message.body}/>}
           </div>)}
           {otherTyping && <div className="typing-indicator" role="status" aria-label={`${selected.display_name} is typing`}><div className="typing-scene" aria-hidden="true"><div className="teddy"><span className="teddy-ear teddy-ear-left"/><span className="teddy-ear teddy-ear-right"/><span className="teddy-head"><i className="teddy-eye teddy-eye-left"/><i className="teddy-eye teddy-eye-right"/><i className="teddy-muzzle"/><i className="teddy-nose"/></span><span className="teddy-body"/><span className="teddy-leg teddy-leg-left"/><span className="teddy-leg teddy-leg-right"/><span className="teddy-arm teddy-arm-left"/><span className="teddy-arm teddy-arm-right"/></div><div className="teddy-laptop"><span className="laptop-screen"><i/><i/><i/></span><span className="laptop-base"/></div></div><span className="typing-caption">typing</span></div>}
         </div>
         {attachment && <div className="message-attachment-preview"><img src={attachmentPreview} alt="Selected photo preview"/><span>{sending ? "Sending photo..." : attachment.name}</span><button type="button" onClick={() => setAttachment(null)} aria-label="Remove attached photo" disabled={sending}>×</button></div>}
         {error && attachment && <div role="alert" className="messages-error message-send-error">{error}</div>}
+        {isRecording && <div className="voice-recording-wrap" role="group" aria-label={`Recording voice note, ${formatFileSize(recordingBytes)} of 5 MB`}>
+          <div className="voice-recording-status">
+            <button type="button" className="voice-recording-stop" onClick={() => stopVoiceRecording()} aria-label="Stop recording and preview voice note"><span/></button>
+            <div className="voice-waveform" aria-hidden="true">{waveformLevels.map((height, index) => <i key={index} style={{ height:`${height}%` }}/>)}</div>
+            <span className="voice-recording-time">{String(Math.floor(recordingSeconds / 60)).padStart(2, "0")}:{String(recordingSeconds % 60).padStart(2, "0")}</span>
+          </div>
+          <div className="voice-recording-capacity"><span><i style={{ width:`${Math.min(recordingBytes / MAX_MESSAGE_AUDIO_BYTES, 1) * 100}%` }}/></span><small>{formatFileSize(recordingBytes)} / 5 MB</small></div>
+        </div>}
+        {recordingDraft && <div className="voice-recording-draft">
+          <audio controls preload="metadata" src={recordingDraftUrl} aria-label="Preview voice note"/>
+          <button type="button" onClick={() => setRecordingDraft(null)} disabled={sending} aria-label="Discard voice note">×</button>
+          <span>{sending ? "Sending voice note..." : "Voice note ready"}</span>
+        </div>}
+        {recordingDraft && error && <div role="alert" className="messages-error message-send-error">{error}</div>}
         <form onSubmit={send} className="message-composer">
           <input ref={attachmentInputRef} className="message-file-input" type="file" accept="image/jpeg,image/png,image/webp,image/gif" onChange={chooseAttachment} aria-label="Choose a photo"/>
-          <button type="button" className="message-attach-button" onClick={() => attachmentInputRef.current?.click()} disabled={sending} aria-label="Attach a photo">＋</button>
-          <input ref={messageInputRef} value={body} onChange={e => updateDraft(e.target.value)} placeholder="Write a message..." aria-label="Write a message"/>
-          <button type="submit" aria-label={sending ? "Sending message" : "Send message"} disabled={sending || (!body.trim() && !attachment)}>{sending ? "…" : "↑"}</button>
+          <button type="button" className="message-attach-button" onClick={() => attachmentInputRef.current?.click()} disabled={sending || isRecording || Boolean(recordingDraft)} aria-label="Attach a photo">＋</button>
+          <input ref={messageInputRef} value={body} onChange={e => updateDraft(e.target.value)} placeholder="Write a message..." aria-label="Write a message" disabled={sending || isRecording}/>
+          <button type="button" className="message-mic-button" onClick={startVoiceRecording} disabled={sending || isRecording || Boolean(attachment) || Boolean(recordingDraft)} aria-label="Start recording voice note" title={`Tap to record a voice note, maximum ${MAX_MESSAGE_AUDIO_BYTES / (1024 * 1024)} MB`}>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Z"/><path d="M19 11a7 7 0 0 1-14 0M12 18v4m-4 0h8"/></svg>
+          </button>
+          <button type="button" onClick={send} aria-label={sending ? "Sending message" : isRecording ? "Stop and send voice note" : recordingDraft ? "Send voice note" : "Send message"} disabled={sending || (!body.trim() && !attachment && !recordingDraft && !isRecording)}>{sending ? "…" : "↑"}</button>
         </form>
       </section>}
     </div>
