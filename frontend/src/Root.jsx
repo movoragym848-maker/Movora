@@ -143,7 +143,7 @@ export default function Root() {
   }
 
   const appContent = gymOwner 
-    ? <GymOwnerDashboard gymOwner={gymOwner} onLogout={handleLogout}/>
+    ? <GymOwnerDashboard gymOwner={gymOwner} onLogout={handleLogout} sharedReel={sharedReel}/>
     : !user 
     ? <AuthScreen onAuth={handleAuth}/> 
     : <App user={user} onLogout={handleLogout} sharedReel={sharedReel}/>;

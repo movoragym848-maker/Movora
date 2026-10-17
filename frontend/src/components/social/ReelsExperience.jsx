@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { DotLottieReact } from "@lottiefiles/dotlottie-react";
 import { addSocialReelComment, createSocialReelFromUpload, getSocialConversations, getSocialReel, getSocialReelComments, getSocialReelMedia, getSocialReelUploadUrl, getSocialReelUploadLimits, getSocialReels, recordSocialReelEvent, resolveApiUrl, sendSocialMessage, setSocialReelCommentPinned, toggleSocialReelLike, uploadReelObject, uploadSocialReel } from "../../services/api";
+import { useReelsState } from "./ReelsState";
+import VerifiedBadge from "./VerifiedBadge";
 const likeAnimationUrl = `${import.meta.env.BASE_URL}like.lottie`;
 import "./ReelsExperience.css";
 
@@ -16,6 +18,64 @@ const filters = [
   { id: "vivid", label: "Vivid", css: "saturate(1.35) contrast(1.08)" },
   { id: "mono", label: "Mono", css: "grayscale(1)" },
 ];
+const manifestPrefetchJobs = new Map();
+const manifestPrefetchQueue = [];
+const MAX_MANIFEST_PREFETCHES = 2;
+let activeManifestPrefetches = 0;
+
+function pumpManifestPrefetchQueue() {
+  while (activeManifestPrefetches < MAX_MANIFEST_PREFETCHES && manifestPrefetchQueue.length) {
+    const job = manifestPrefetchQueue.shift();
+    if (job.cancelled || manifestPrefetchJobs.get(job.url) !== job) continue;
+    activeManifestPrefetches += 1;
+    job.controller = new AbortController();
+    let headers = {};
+    try {
+      const session = JSON.parse(localStorage.getItem("rs_session") || localStorage.getItem("rs_gym_owner_session") || "null");
+      const apiOrigin = new URL(resolveApiUrl("/"), window.location.href).origin;
+      if (session?.accessToken && new URL(job.url, window.location.href).origin === apiOrigin) {
+        headers = { Authorization: `Bearer ${session.accessToken}` };
+      }
+    } catch {
+      headers = {};
+    }
+    fetch(job.url, { headers, signal:job.controller.signal, cache:"force-cache" })
+      .then(response => {
+        if (!response.ok) throw new Error(`Manifest prefetch failed (${response.status})`);
+        return response.text();
+      })
+      .catch(error => {
+        if (!job.cancelled) console.warn("Unable to prefetch Reel manifest:", error.message);
+      })
+      .finally(() => {
+        activeManifestPrefetches -= 1;
+        if (manifestPrefetchJobs.get(job.url) === job) manifestPrefetchJobs.delete(job.url);
+        pumpManifestPrefetchQueue();
+      });
+  }
+}
+
+function prefetchReelManifest(url) {
+  if (!url) return () => {};
+  let job = manifestPrefetchJobs.get(url);
+  if (!job) {
+    job = { url, cancelled:false, controller:null };
+    manifestPrefetchJobs.set(url, job);
+    manifestPrefetchQueue.push(job);
+    pumpManifestPrefetchQueue();
+  }
+  job.consumers = (job.consumers || 0) + 1;
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    job.consumers -= 1;
+    if (job.consumers > 0 || manifestPrefetchJobs.get(url) !== job) return;
+    job.cancelled = true;
+    job.controller?.abort();
+    manifestPrefetchJobs.delete(url);
+  };
+}
 
 function initials(name = "Movora") {
   return name.split(" ").map(part => part[0]).join("").slice(0, 2).toUpperCase();
@@ -27,23 +87,30 @@ function ReelIcon({ type, filled = false }) {
   return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3m0 0L7.5 7.5M12 3l4.5 4.5M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6" fill="none" /></svg>;
 }
 
-function ReelCard({ reel, feedIndex, active, preload, onLike, onComments, onShare }) {
+function ReelCard({ reel, feedIndex, active, playbackEnabled, mediaTier, playersRef, onLike, onComments, onShare }) {
   const [source, setSource] = useState(reel.video_url || "");
   const [mediaError, setMediaError] = useState(false);
+  const [readySource, setReadySource] = useState("");
   const [showLikeAnimation, setShowLikeAnimation] = useState(false);
   const [likeAnimationKey, setLikeAnimationKey] = useState(0);
   const videoRef = useRef(null);
+  const hlsRef = useRef(null);
   const mediaUrlRef = useRef("");
   const activeRef = useRef(active);
+  const mediaTierRef = useRef(mediaTier);
+  const playbackEnabledRef = useRef(playbackEnabled);
   const likeAnimationTimerRef = useRef(null);
   const videoClickTimerRef = useRef(null);
   const watchSampleRef = useRef({ currentTime:0, sentAt:0 });
-  const shouldMountMedia = active || preload;
-  activeRef.current = active;
+  const shouldMountMedia = mediaTier === "active" || mediaTier === "prefetch" || mediaTier === "retained";
+  activeRef.current = active && playbackEnabled;
+  mediaTierRef.current = mediaTier;
+  playbackEnabledRef.current = playbackEnabled;
+  const videoReady = readySource === source;
 
   useEffect(() => {
-    if (active) recordSocialReelEvent(reel.id, { eventType:"impression" }).catch(() => {});
-  }, [active, reel.id]);
+    if (active && playbackEnabled) recordSocialReelEvent(reel.id, { eventType:"impression" }).catch(() => {});
+  }, [active, playbackEnabled, reel.id]);
 
   const handleWatchTime = event => {
     const video = event.currentTarget;
@@ -80,7 +147,7 @@ function ReelCard({ reel, feedIndex, active, preload, onLike, onComments, onShar
       setSource(mediaUrlRef.current);
       return undefined;
     }
-    if (!active && !preload) return undefined;
+    if (mediaTier === "none" || mediaTier === "lazy") return undefined;
     setSource("");
     getSocialReelMedia(reel.id).then(blob => {
       if (cancelled) return;
@@ -91,7 +158,12 @@ function ReelCard({ reel, feedIndex, active, preload, onLike, onComments, onShar
     return () => {
       cancelled = true;
     };
-  }, [active, preload, reel.id, reel.media_type, reel.status, reel.video_hls_url, reel.video_url]);
+  }, [active, mediaTier, reel.id, reel.media_type, reel.status, reel.video_hls_url, reel.video_url]);
+
+  useEffect(() => {
+    if (mediaTier !== "lazy" || !reel.video_hls_url) return undefined;
+    return prefetchReelManifest(resolveApiUrl(reel.video_hls_url));
+  }, [mediaTier, reel.video_hls_url]);
 
   useEffect(() => () => {
     if (mediaUrlRef.current) URL.revokeObjectURL(mediaUrlRef.current);
@@ -100,8 +172,11 @@ function ReelCard({ reel, feedIndex, active, preload, onLike, onComments, onShar
   useEffect(() => {
     const video = videoRef.current;
     if (!video || !source || !shouldMountMedia) return undefined;
+    setReadySource("");
     let cancelled = false;
     let hls;
+    const playerState = { video, hls:null };
+    playersRef.current.set(reel.feedKey, playerState);
     const attachStream = async () => {
       if (!source.includes(".m3u8")) {
         video.load();
@@ -116,17 +191,46 @@ function ReelCard({ reel, feedIndex, active, preload, onLike, onComments, onShar
       const playlistOrigin = new URL(source, window.location.href).origin;
       if (Hls.isSupported()) {
         hls = new Hls({
-          startLevel:0,
+          startLevel:-1,
           capLevelToPlayerSize:true,
-          maxBufferLength:12,
-          maxMaxBufferLength:24,
+          maxBufferLength:10,
+          maxMaxBufferLength:30,
+          enableWorker:true,
+          lowLatencyMode:true,
+          startFragPrefetch:true,
+          abrEwmaDefaultEstimate:500000,
           xhrSetup(xhr) {
             if (token && playlistOrigin === apiOrigin) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
           },
         });
+        hlsRef.current = hls;
+        playerState.hls = hls;
+        hls.on(Hls.Events.BUFFER_APPENDED, () => {
+          if (activeRef.current) return;
+          if (!playbackEnabledRef.current) {
+            hls.stopLoad();
+            return;
+          }
+          if (mediaTierRef.current !== "prefetch") {
+            hls.stopLoad();
+            return;
+          }
+          if (video.buffered.length === 0) return;
+          let bufferedAhead = 0;
+          for (let index = 0; index < video.buffered.length; index += 1) {
+            const start = video.buffered.start(index);
+            const end = video.buffered.end(index);
+            if (video.currentTime >= start - 0.25 && video.currentTime <= end) {
+              bufferedAhead = end - video.currentTime;
+              break;
+            }
+          }
+          if (bufferedAhead >= 4) hls.stopLoad();
+        });
         hls.loadSource(source);
         hls.attachMedia(video);
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          if (mediaTierRef.current === "retained") hls.stopLoad();
           if (activeRef.current) video.play().catch(() => {});
         });
         hls.on(Hls.Events.ERROR, (_event, data) => {
@@ -145,15 +249,25 @@ function ReelCard({ reel, feedIndex, active, preload, onLike, onComments, onShar
       cancelled = true;
       video.pause();
       hls?.destroy();
+      if (hlsRef.current === hls) hlsRef.current = null;
+      if (playersRef.current.get(reel.feedKey) === playerState) playersRef.current.delete(reel.feedKey);
     };
-  }, [shouldMountMedia, source]);
+  }, [playersRef, reel.feedKey, shouldMountMedia, source]);
 
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
-    if (active) video.play().catch(() => {});
-    else video.pause();
-  }, [active, shouldMountMedia, source]);
+    if (active && playbackEnabled) {
+      video.muted = false;
+      hlsRef.current?.startLoad(video.currentTime);
+      video.play().catch(() => {});
+    } else {
+      video.pause();
+      video.muted = true;
+      if (!playbackEnabled || mediaTier === "retained") hlsRef.current?.stopLoad();
+      else if (mediaTier === "prefetch") hlsRef.current?.startLoad(video.currentTime);
+    }
+  }, [active, mediaTier, playbackEnabled, shouldMountMedia, source]);
 
   useEffect(() => () => {
     if (likeAnimationTimerRef.current) window.clearTimeout(likeAnimationTimerRef.current);
@@ -169,10 +283,20 @@ function ReelCard({ reel, feedIndex, active, preload, onLike, onComments, onShar
 
   const toggleVideoPlayback = event => {
     const video = event.currentTarget;
+    if (!activeRef.current) {
+      video.pause();
+      video.muted = true;
+      return;
+    }
     if (videoClickTimerRef.current) window.clearTimeout(videoClickTimerRef.current);
+    videoClickTimerRef.current = null;
+    if (video.paused) {
+      video.muted = false;
+      video.play().catch(() => {});
+      return;
+    }
     videoClickTimerRef.current = window.setTimeout(() => {
-      if (video.paused) video.play().catch(() => {});
-      else video.pause();
+      video.pause();
       videoClickTimerRef.current = null;
     }, 250);
   };
@@ -196,15 +320,19 @@ function ReelCard({ reel, feedIndex, active, preload, onLike, onComments, onShar
 
   const isImage = reel.media_type?.startsWith("image/");
   return <article className="reel-page" data-reel-id={reel.feedKey} data-feed-index={feedIndex} onDoubleClick={likeWithAnimation}>
+    {mediaTier === "lazy" && !!reel.thumbnail_url && <img className="reel-media reel-thumbnail" src={resolveApiUrl(reel.thumbnail_url)} alt="" aria-hidden="true" />}
     {shouldMountMedia && source && (isImage
       ? <img className="reel-media" src={source} alt="" />
-      : <video ref={videoRef} className="reel-media" src={source.includes(".m3u8") ? undefined : source} poster={reel.thumbnail_url ? resolveApiUrl(reel.thumbnail_url) : undefined} playsInline loop muted preload={active ? "auto" : "metadata"} onClick={toggleVideoPlayback} onTimeUpdate={handleWatchTime} />)}
+      : <>
+        {!!reel.thumbnail_url && <img className={`reel-media reel-thumbnail${videoReady ? " is-ready" : ""}`} src={resolveApiUrl(reel.thumbnail_url)} alt="" aria-hidden="true" />}
+        <video ref={videoRef} className="reel-media" src={source.includes(".m3u8") ? undefined : source} poster={reel.thumbnail_url ? resolveApiUrl(reel.thumbnail_url) : undefined} playsInline loop muted={!active || !playbackEnabled} preload={mediaTier === "active" || mediaTier === "prefetch" ? "auto" : "metadata"} onPlaying={() => setReadySource(source)} onClick={toggleVideoPlayback} onTimeUpdate={handleWatchTime} />
+      </>)}
     {mediaError && <div className="reel-media-error">This post could not be loaded.</div>}
     {reel.status === "processing" && <div className="reel-processing-status" role="status"><span className="reel-processing-spinner"/>Preparing HD video...</div>}
     {reel.status === "failed" && <div className="reel-processing-status" role="status">Video processing failed.</div>}
     <div className="reel-shade" />
     {showLikeAnimation && <div className="reel-like-burst" aria-hidden="true"><DotLottieReact key={likeAnimationKey} src={likeAnimationUrl} autoplay loop={false} /></div>}
-    <div className="reel-author"><span className="reel-avatar">{initials(reel.display_name)}</span><strong>{reel.display_name}</strong><span>@{reel.username}</span></div>
+    <div className="reel-author"><span className="reel-avatar">{initials(reel.display_name)}</span><strong>{reel.display_name}<VerifiedBadge accountType={reel.account_type}/></strong><span>@{reel.username}</span></div>
     <div className="reel-actions">
       <button type="button" className={`reel-action${reel.liked ? " is-liked" : ""}`} onClick={likeFromButton} aria-label={reel.liked ? "Unlike reel" : "Like reel"} aria-pressed={Boolean(reel.liked)}><ReelIcon type="heart" filled={reel.liked}/><span>{reel.like_count || 0}</span></button>
       <button type="button" className="reel-action" onClick={() => onComments(reel)} aria-label="Open comments"><ReelIcon type="comment"/><span>{reel.comment_count || 0}</span></button>
@@ -282,7 +410,7 @@ function CommentsSheet({ reel, onClose, onCommentAdded }) {
     <div className={`reel-comment${comment.is_pinned ? " is-pinned" : ""}`}>
       <span className="reel-comment-avatar">{initials(comment.display_name)}</span>
       <div className="reel-comment-content">
-        <div className="reel-comment-heading"><strong>{comment.display_name}</strong>{comment.is_pinned && <span className="reel-comment-pinned">Pinned</span>}</div>
+        <div className="reel-comment-heading"><strong>{comment.display_name}<VerifiedBadge accountType={comment.account_type}/></strong>{comment.is_pinned && <span className="reel-comment-pinned">Pinned</span>}</div>
         <p>{comment.body}</p>
         <div className="reel-comment-tools">
           <button type="button" onClick={() => { setReplyingTo(comment); setDraft(""); }}>Reply</button>
@@ -376,14 +504,19 @@ function ShareSheet({ reel, shareUrl, onClose }) {
   </div>;
 }
 
-export default function ReelsExperience({ onExit }) {
+export default function ReelsExperience({ onExit, visible = true }) {
+  const {
+    reels,
+    setReels,
+    currentIndex,
+    setCurrentIndex,
+    playersRef,
+  } = useReelsState();
   const [view, setView] = useState(FEED_VIEW);
-  const [reels, setReels] = useState([]);
   const [cursor, setCursor] = useState(null);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [feedError, setFeedError] = useState("");
-  const [activeReelKey, setActiveReelKey] = useState(null);
   const [commentsReel, setCommentsReel] = useState(null);
   const [sharingReel, setSharingReel] = useState(null);
   const [cameraFacing, setCameraFacing] = useState("user");
@@ -406,8 +539,11 @@ export default function ReelsExperience({ onExit }) {
   const [publishError, setPublishError] = useState("");
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadStage, setUploadStage] = useState("");
+  const [tabVisible, setTabVisible] = useState(() => document.visibilityState === "visible" && document.hasFocus());
   const feedRef = useRef(null);
   const loadMoreRef = useRef(null);
+  const scrollResetTimerRef = useRef(null);
+  const scrollingRef = useRef(false);
   const cameraVideoRef = useRef(null);
   const cameraStreamRef = useRef(null);
   const cameraFacingRef = useRef(cameraFacing);
@@ -423,6 +559,56 @@ export default function ReelsExperience({ onExit }) {
   const loadingRef = useRef(false);
   const nextFeedKeyRef = useRef(0);
   const previewUrlRef = useRef("");
+  const playbackEnabled = visible && tabVisible;
+  const pauseAllReels = () => {
+    playersRef.current.forEach(({ video }) => {
+      video.pause();
+      video.muted = true;
+    });
+  };
+  const activateReel = index => {
+    const reel = reels[index];
+    const activePlayer = reel && playersRef.current.get(reel.feedKey);
+    playersRef.current.forEach(player => {
+      if (player !== activePlayer) {
+        player.video.pause();
+        player.video.muted = true;
+      }
+    });
+    if (activePlayer) {
+      activePlayer.video.muted = !playbackEnabled;
+      if (playbackEnabled) {
+        activePlayer.hls?.startLoad(activePlayer.video.currentTime);
+        activePlayer.video.play().catch(() => {});
+      } else {
+        activePlayer.video.pause();
+      }
+    }
+    setCurrentIndex(index);
+  };
+  const handleFeedScroll = () => {
+    if (!scrollingRef.current) pauseAllReels();
+    scrollingRef.current = true;
+    if (scrollResetTimerRef.current) window.clearTimeout(scrollResetTimerRef.current);
+    scrollResetTimerRef.current = window.setTimeout(() => {
+      scrollingRef.current = false;
+      scrollResetTimerRef.current = null;
+    }, 120);
+  };
+
+  useEffect(() => {
+    const updateVisibility = () => setTabVisible(document.visibilityState === "visible" && document.hasFocus());
+    document.addEventListener("visibilitychange", updateVisibility);
+    window.addEventListener("focus", updateVisibility);
+    window.addEventListener("blur", updateVisibility);
+    updateVisibility();
+    return () => {
+      document.removeEventListener("visibilitychange", updateVisibility);
+      window.removeEventListener("focus", updateVisibility);
+      window.removeEventListener("blur", updateVisibility);
+      if (scrollResetTimerRef.current) window.clearTimeout(scrollResetTimerRef.current);
+    };
+  }, []);
 
   const currentFilter = filters.find(filter => filter.id === selectedFilter) || filters[0];
   const recordingProgress = Math.min(100, maxVideoBytes > 0 ? recordedBytes / maxVideoBytes * 100 : 0);
@@ -456,18 +642,23 @@ export default function ReelsExperience({ onExit }) {
           .map(reel => ({ ...reel, feedKey:`${reel.id}:${nextFeedKeyRef.current++}` }));
         setReels(items);
         setCursor(data.nextCursor);
-        setActiveReelKey(null);
+        setCurrentIndex(-1);
         requestAnimationFrame(() => feedRef.current?.scrollTo({ top:0, behavior:"instant" }));
         return;
       }
-      const data = await getSocialReels(nextCursor);
+      const data = await getSocialReels(nextCursor, 10);
       const items = data.items.map(reel => ({ ...reel, feedKey:`${reel.id}:${nextFeedKeyRef.current++}` }));
       setReels(current => nextCursor ? [...current, ...items] : items);
       setCursor(data.nextCursor);
-      if (!nextCursor && items[0]) setActiveReelKey(items[0].feedKey);
+      if (!nextCursor && items[0]) {
+        setCurrentIndex(0);
+      }
     } catch (err) {
       const sharedReelId = new URLSearchParams(window.location.search).get("reel");
-      if (!nextCursor && sharedReelId) setReels([]);
+      if (!nextCursor && sharedReelId) {
+        setReels([]);
+        setCurrentIndex(-1);
+      }
       if (sharedReelId && err.status === 404) {
         setFeedError("This Reel link was not found. Check the link and make sure the latest Movora backend is deployed.");
       } else {
@@ -497,10 +688,10 @@ export default function ReelsExperience({ onExit }) {
 
   useEffect(() => {
     const root = feedRef.current;
-    if (view !== FEED_VIEW || !root || !cursor || reels.length < 3) return undefined;
-    const fetchTarget = root.querySelector(`[data-feed-index="${Math.max(0, reels.length - 3)}"]`);
+    if (view !== FEED_VIEW || !root || !cursor || reels.length === 0) return undefined;
+    const fetchTarget = root.querySelector(`[data-feed-index="${Math.max(0, reels.length - 40)}"]`);
     if (!fetchTarget) return undefined;
-    // Fetch while two full-screen items remain, so the next batch is ready before the user reaches the end.
+    // Keep enough feed data loaded to fill the forty-Reel rolling media window.
     const observer = new IntersectionObserver(entries => {
       if (entries.some(entry => entry.isIntersecting) && !loadingRef.current) loadPage(cursor);
     }, { root, threshold:0.1 });
@@ -515,11 +706,13 @@ export default function ReelsExperience({ onExit }) {
     const observer = new IntersectionObserver(entries => {
       entries.forEach(entry => visibility.set(entry.target, entry.intersectionRatio));
       const current = [...visibility.entries()].sort((a, b) => b[1] - a[1])[0];
-      setActiveReelKey(current?.[1] >= 0.8 ? current[0].dataset.reelId : null);
+      if (current?.[1] >= 0.8) {
+        activateReel(Number(current[0].dataset.feedIndex));
+      }
     }, { root, threshold:[0, 0.8] });
     root.querySelectorAll("[data-reel-id]").forEach(node => observer.observe(node));
     return () => observer.disconnect();
-  }, [reels, view]);
+  }, [playbackEnabled, reels, view]);
 
   useEffect(() => {
     if (view !== CAMERA_VIEW) return undefined;
@@ -804,7 +997,7 @@ export default function ReelsExperience({ onExit }) {
       const items = data.items.map(reel => ({ ...reel, feedKey:`${reel.id}:${nextFeedKeyRef.current++}` }));
       setReels(items);
       setCursor(data.nextCursor);
-      setActiveReelKey(null);
+      setCurrentIndex(-1);
       setCaption("");
       setWorkoutTag("");
       setLocation("");
@@ -813,7 +1006,7 @@ export default function ReelsExperience({ onExit }) {
       setUploadProgress(0);
       retake();
       setView(FEED_VIEW);
-      requestAnimationFrame(() => feedRef.current?.scrollTo({ top:0, behavior:"smooth" }));
+      requestAnimationFrame(() => feedRef.current?.scrollTo({ top:0, behavior:"instant" }));
     } catch (error) {
       setPublishError(error.message || "Unable to publish this post.");
     }
@@ -850,12 +1043,26 @@ export default function ReelsExperience({ onExit }) {
   };
 
   const commentAdded = reelId => setReels(current => current.map(item => item.id === reelId ? { ...item, comment_count:(item.comment_count || 0) + 1 } : item));
-  const activeReelIndex = reels.findIndex(reel => reel.feedKey === activeReelKey);
+  const activeReelIndex = currentIndex;
 
   return <main className="reels-experience" data-view={view}>
-    <div className="reels-feed" ref={feedRef} aria-label="Reels feed">
+    <div className="reels-feed" ref={feedRef} aria-label="Reels feed" onScroll={handleFeedScroll}>
       {loading && <div className="reels-loading">Loading Reels...</div>}
-      {!loading && reels.map((reel, index) => <ReelCard key={reel.feedKey} reel={reel} feedIndex={index} active={view === FEED_VIEW && activeReelKey === reel.feedKey} preload={view === FEED_VIEW && index === activeReelIndex + 1} onLike={toggleLike} onComments={setCommentsReel} onShare={shareReel}/>)}
+      {!loading && reels.map((reel, index) => {
+        const offset = index - activeReelIndex;
+        const mediaTier = view !== FEED_VIEW || activeReelIndex < 0
+          ? "none"
+          : offset === 0
+            ? "active"
+            : offset >= 1 && offset <= 5
+              ? "prefetch"
+              : offset >= -2 && offset < 0
+                ? "retained"
+                : offset >= 6 && offset <= 40
+                  ? "lazy"
+                  : "none";
+        return <ReelCard key={reel.feedKey} reel={reel} feedIndex={index} active={mediaTier === "active"} playbackEnabled={playbackEnabled} mediaTier={mediaTier} playersRef={playersRef} onLike={toggleLike} onComments={setCommentsReel} onShare={shareReel}/>;
+      })}
       {!loading && reels.length === 0 && <div className="reels-empty"><span className="reels-empty-mark">M</span><h1>Movora Reels</h1><p>Movement looks better in motion.</p><button type="button" onClick={() => setView(CAMERA_VIEW)}>Create the first post</button></div>}
       {feedError && view === FEED_VIEW && <div className="reels-feed-error" role="alert">{feedError}<button type="button" onClick={() => loadPage(null)}>Retry</button></div>}
       <div ref={loadMoreRef} className="reels-feed-end">{loadingMore ? "Loading more" : cursor ? "" : reels.length ? "You're all caught up" : ""}</div>

@@ -73,7 +73,7 @@ async function transcodeVariant(inputPath, outputDir, height, maxRate) {
     "-c:v", "libx264", "-preset", "veryfast", "-profile:v", "main", "-pix_fmt", "yuv420p",
     "-maxrate", maxRate, "-bufsize", height === 720 ? "3600k" : "7500k",
     "-c:a", "aac", "-b:a", "128k", "-ac", "2", "-sn", "-dn",
-    "-f", "hls", "-hls_time", "4", "-hls_playlist_type", "vod",
+    "-f", "hls", "-hls_time", "2", "-hls_playlist_type", "vod",
     "-hls_flags", "independent_segments", "-hls_segment_filename", segmentPattern, playlistPath,
   ]);
 }

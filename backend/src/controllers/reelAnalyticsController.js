@@ -10,7 +10,7 @@ const eventSchema = z.object({
 });
 
 function authUser(req) {
-  return req.user?.role === "gym_owner" ? null : req.user?.sub;
+  return req.user?.sub;
 }
 
 export async function listMyReels(req, res, next) {
@@ -114,9 +114,10 @@ export async function getMyReelAnalytics(req, res, next) {
         ON c.reel_id = $1 AND c.created_at >= periods.period_start AND c.created_at < periods.period_start + periods.period_length
       GROUP BY period_start, periods.unit ORDER BY period_start`, [req.params.reelId]),
       query(`SELECT c.id, c.body, c.parent_comment_id, c.is_pinned, c.created_at, c.user_id,
-          COALESCE(p.display_name, 'Movora member') AS display_name, p.username, p.avatar_url
+        COALESCE(p.display_name, 'Movora member') AS display_name, p.username, p.avatar_url, a.account_type
         FROM social_reel_comments c
         LEFT JOIN social_profiles p ON p.user_id = c.user_id
+      LEFT JOIN social_accounts a ON a.id = p.user_id
         WHERE c.reel_id = $1
         ORDER BY c.created_at DESC
         LIMIT 100`, [req.params.reelId]),

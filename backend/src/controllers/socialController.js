@@ -22,7 +22,7 @@ export const maxReelMediaBytes = Number.isSafeInteger(configuredReelMediaBytes) 
   ? configuredReelMediaBytes
   : 150 * 1024 * 1024;
 
-function authUser(req) { return req.user?.role === "gym_owner" ? null : req.user?.sub; }
+function authUser(req) { return req.user?.sub; }
 
 export function getSocialReelUploadLimits(req, res) {
   if (!authUser(req)) return res.status(403).json({ message:"Social features are available for member accounts." });
@@ -34,8 +34,9 @@ export async function getSocialNotes(req, res, next) {
     const userId = authUser(req);
     if (!userId) return res.status(403).json({ message: "Social features are available for member accounts." });
     const { rows } = await query(`
-      SELECT n.user_id, n.text, n.created_at, p.username, p.display_name, p.avatar_url
+      SELECT n.user_id, n.text, n.created_at, p.username, p.display_name, p.avatar_url, a.account_type
       FROM social_notes n JOIN social_profiles p ON p.user_id = n.user_id
+      JOIN social_accounts a ON a.id = p.user_id
       WHERE n.updated_at > now() - interval '25 hours'
         AND (n.user_id = $1 OR EXISTS (
           SELECT 1 FROM social_friend_requests r
@@ -68,11 +69,11 @@ export async function getSocialProfile(req, res, next) {
     const userId = authUser(req);
     if (!userId) return res.status(403).json({ message: "Social features are available for member accounts." });
     const { rows } = await query(`
-      SELECT p.user_id, p.username, p.display_name, p.bio, p.avatar_url, p.created_at,
+      SELECT p.user_id, p.username, p.display_name, p.bio, p.avatar_url, p.created_at, a.account_type,
         (SELECT count(*)::int FROM social_follows WHERE following_id = p.user_id) AS followers,
         (SELECT count(*)::int FROM social_follows WHERE follower_id = p.user_id) AS following,
         (SELECT count(*)::int FROM social_reels WHERE creator_id = p.user_id) AS posts
-      FROM social_profiles p WHERE p.user_id = $1`, [userId]);
+      FROM social_profiles p JOIN social_accounts a ON a.id = p.user_id WHERE p.user_id = $1`, [userId]);
     res.json(rows[0] || null);
   } catch (err) { next(err); }
 }
@@ -90,11 +91,11 @@ export async function saveSocialProfile(req, res, next) {
       RETURNING user_id`,
       [userId, input.username, input.displayName, input.bio, input.avatarUrl || null]);
     const { rows } = await query(`
-      SELECT p.user_id, p.username, p.display_name, p.bio, p.avatar_url, p.created_at,
+      SELECT p.user_id, p.username, p.display_name, p.bio, p.avatar_url, p.created_at, a.account_type,
         (SELECT count(*)::int FROM social_follows WHERE following_id = p.user_id) AS followers,
         (SELECT count(*)::int FROM social_follows WHERE follower_id = p.user_id) AS following,
         (SELECT count(*)::int FROM social_reels WHERE creator_id = p.user_id) AS posts
-      FROM social_profiles p WHERE p.user_id = $1`, [userId]);
+      FROM social_profiles p JOIN social_accounts a ON a.id = p.user_id WHERE p.user_id = $1`, [userId]);
     res.status(201).json(rows[0]);
   } catch (err) {
     if (err.code === "23505") return res.status(409).json({ message: "That username is already taken." });
@@ -110,7 +111,7 @@ export async function searchSocialProfiles(req, res, next) {
     const q = String(req.query.q || "").trim().toLowerCase();
     if (q.length < 2) return res.json([]);
     const { rows } = await query(`
-      SELECT p.user_id, p.username, p.display_name, p.bio, p.avatar_url,
+      SELECT p.user_id, p.username, p.display_name, p.bio, p.avatar_url, a.account_type,
         EXISTS (SELECT 1 FROM social_follows f WHERE f.follower_id = $1 AND f.following_id = p.user_id) AS following,
         CASE
           WHEN EXISTS (SELECT 1 FROM social_friend_requests r WHERE r.requester_id = $1 AND r.recipient_id = p.user_id AND r.status = 'accepted')
@@ -121,7 +122,7 @@ export async function searchSocialProfiles(req, res, next) {
         END AS request_status,
         (SELECT count(*)::int FROM social_follows WHERE following_id = p.user_id) AS followers,
         (SELECT count(*)::int FROM social_follows WHERE follower_id = p.user_id) AS following_count
-      FROM social_profiles p
+      FROM social_profiles p JOIN social_accounts a ON a.id = p.user_id
       WHERE p.user_id <> $1 AND (p.username::text ILIKE $2 OR p.display_name ILIKE $2)
       ORDER BY p.username LIMIT 20`, [userId, `%${q}%`]);
     res.json(rows);
@@ -133,13 +134,15 @@ export async function listFriendRequests(req, res, next) {
     const userId = authUser(req);
     if (!userId) return res.status(403).json({ message: "Social features are available for member accounts." });
     const [incoming, outgoing] = await Promise.all([
-      query(`SELECT r.id, r.status, r.created_at, p.user_id, p.username, p.display_name, p.avatar_url,
+      query(`SELECT r.id, r.status, r.created_at, p.user_id, p.username, p.display_name, p.avatar_url, a.account_type,
         EXISTS (SELECT 1 FROM social_follows f WHERE f.follower_id = $1 AND f.following_id = p.user_id) AS following
         FROM social_friend_requests r JOIN social_profiles p ON p.user_id = r.requester_id
+        JOIN social_accounts a ON a.id = p.user_id
         WHERE r.recipient_id = $1 AND r.status IN ('pending', 'accepted') ORDER BY r.created_at DESC`, [userId]),
-      query(`SELECT r.id, r.status, r.created_at, p.user_id, p.username, p.display_name, p.avatar_url,
+      query(`SELECT r.id, r.status, r.created_at, p.user_id, p.username, p.display_name, p.avatar_url, a.account_type,
         EXISTS (SELECT 1 FROM social_follows f WHERE f.follower_id = $1 AND f.following_id = p.user_id) AS following
         FROM social_friend_requests r JOIN social_profiles p ON p.user_id = r.recipient_id
+        JOIN social_accounts a ON a.id = p.user_id
         WHERE r.requester_id = $1 AND r.status IN ('pending', 'accepted') ORDER BY r.created_at DESC`, [userId]),
     ]);
     res.json({ incoming: incoming.rows, outgoing: outgoing.rows });
@@ -234,8 +237,9 @@ export async function listReels(req, res, next) {
         r.seed_like_count + (SELECT count(*)::int FROM social_reel_likes l WHERE l.reel_id = r.id) AS like_count,
         EXISTS (SELECT 1 FROM social_reel_likes l WHERE l.reel_id = r.id AND l.user_id = $1) AS liked,
         r.seed_comment_count + (SELECT count(*)::int FROM social_reel_comments c WHERE c.reel_id = r.id) AS comment_count,
-        p.user_id, p.username, p.display_name, p.avatar_url
+        p.user_id, p.username, p.display_name, p.avatar_url, a.account_type
       FROM social_reels r JOIN social_profiles p ON p.user_id = r.creator_id
+      JOIN social_accounts a ON a.id = p.user_id
       WHERE ${visibilityFilter}`;
     const { rows } = await query(`${selectReels} ${cursorFilter} ORDER BY r.created_at DESC, r.id DESC LIMIT ${limitParam}`, params);
 
@@ -301,8 +305,9 @@ export async function getSocialReel(req, res, next) {
         r.seed_like_count + (SELECT count(*)::int FROM social_reel_likes l WHERE l.reel_id = r.id) AS like_count,
         EXISTS (SELECT 1 FROM social_reel_likes l WHERE l.reel_id = r.id AND l.user_id = $2) AS liked,
         r.seed_comment_count + (SELECT count(*)::int FROM social_reel_comments c WHERE c.reel_id = r.id) AS comment_count,
-        p.user_id, p.username, p.display_name, p.avatar_url
-      FROM social_reels r JOIN social_profiles p ON p.user_id = r.creator_id WHERE r.id = $1`, [req.params.reelId, userId]);
+        p.user_id, p.username, p.display_name, p.avatar_url, a.account_type
+      FROM social_reels r JOIN social_profiles p ON p.user_id = r.creator_id
+      JOIN social_accounts a ON a.id = p.user_id WHERE r.id = $1`, [req.params.reelId, userId]);
     res.json(rows[0]);
   } catch (err) { next(err); }
 }
@@ -374,10 +379,11 @@ export async function getSocialReelComments(req, res, next) {
     if (!userId) return res.status(403).json({ message: "Social features are available for member accounts." });
     if (!await findVisibleReel(req.params.reelId, userId)) return res.status(404).json({ message: "Post not found." });
     const { rows } = await query(`SELECT c.id, c.body, c.parent_comment_id, c.is_pinned, c.created_at,
-        p.user_id, p.display_name, p.username, p.avatar_url, (r.creator_id = $2) AS can_manage
+        p.user_id, p.display_name, p.username, p.avatar_url, a.account_type, (r.creator_id = $2) AS can_manage
       FROM social_reel_comments c
       JOIN social_reels r ON r.id = c.reel_id
       LEFT JOIN social_profiles p ON p.user_id = c.user_id
+      LEFT JOIN social_accounts a ON a.id = p.user_id
       WHERE c.reel_id = $1
       ORDER BY c.is_pinned DESC, c.created_at ASC
       LIMIT 500`, [req.params.reelId, userId]);
@@ -398,9 +404,10 @@ export async function addSocialReelComment(req, res, next) {
     const { rows } = await query(`INSERT INTO social_reel_comments (reel_id, user_id, body, parent_comment_id)
       VALUES ($1, $2, $3, $4)
       RETURNING id, body, parent_comment_id, is_pinned, created_at`, [req.params.reelId, userId, input.body, input.parentCommentId || null]);
-    const { rows:profileRows } = await query(`SELECT p.user_id, p.display_name, p.username, p.avatar_url,
+    const { rows:profileRows } = await query(`SELECT p.user_id, p.display_name, p.username, p.avatar_url, a.account_type,
         (r.creator_id = p.user_id) AS can_manage
-      FROM social_profiles p JOIN social_reels r ON r.id = $2
+      FROM social_profiles p JOIN social_accounts a ON a.id = p.user_id
+      JOIN social_reels r ON r.id = $2
       WHERE p.user_id = $1`, [userId, req.params.reelId]);
     res.status(201).json({ ...rows[0], ...profileRows[0] });
   } catch (err) {
@@ -445,10 +452,11 @@ export async function listConversations(req, res, next) {
       WHERE r.status = 'accepted' AND (r.requester_id = $1 OR r.recipient_id = $1)
       ON CONFLICT (participant_a, participant_b) DO NOTHING`, [userId]);
     const { rows } = await query(`
-      SELECT c.id, p.user_id, p.username, p.display_name, p.avatar_url,
+      SELECT c.id, p.user_id, p.username, p.display_name, p.avatar_url, a.account_type,
         m.body AS last_message, m.created_at AS last_message_at
       FROM social_conversations c
       JOIN social_profiles p ON p.user_id = CASE WHEN c.participant_a = $1 THEN c.participant_b ELSE c.participant_a END
+      JOIN social_accounts a ON a.id = p.user_id
       LEFT JOIN LATERAL (
         SELECT COALESCE(NULLIF(body, ''), CASE WHEN media_type LIKE 'audio/%' THEN 'Voice note' WHEN media_type LIKE 'image/%' THEN 'Photo' END) AS body, created_at
         FROM social_messages WHERE conversation_id = c.id ORDER BY created_at DESC LIMIT 1
@@ -657,9 +665,10 @@ export async function listCallSignals(req, res, next) {
     if (!userId) return res.status(403).json({ message: "Social features are available for member accounts." });
     const since = req.query.since ? new Date(req.query.since) : new Date(0);
     const { rows } = await query(`SELECT s.id, s.sender_id, s.recipient_id, s.signal_type, s.payload, s.created_at,
-        p.username AS sender_username, p.display_name AS sender_display_name, p.avatar_url AS sender_avatar_url
+        p.username AS sender_username, p.display_name AS sender_display_name, p.avatar_url AS sender_avatar_url, a.account_type AS sender_account_type
       FROM social_call_signals s
       LEFT JOIN social_profiles p ON p.user_id = s.sender_id
+      LEFT JOIN social_accounts a ON a.id = p.user_id
       WHERE s.recipient_id = $1 AND s.created_at > GREATEST($2, now() - interval '30 seconds')
       ORDER BY s.created_at ASC LIMIT 100`, [userId, since]);
     res.json(rows);

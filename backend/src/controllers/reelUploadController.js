@@ -28,7 +28,7 @@ const reelSchema = z.object({
 });
 
 function authUser(req) {
-  return req.user?.role === "gym_owner" ? null : req.user?.sub;
+  return req.user?.sub;
 }
 
 function handleR2Error(error, res, next) {

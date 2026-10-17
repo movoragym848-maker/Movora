@@ -1,10 +1,11 @@
 import express, { Router } from "express";
 import { requireAuth } from "../middleware/auth.js";
+import { ensureSocialAccount } from "../middleware/socialAccount.js";
 import { addSocialReelComment, createReel, createUploadedReel, getMessageAudio, getMessageImage, getSocialNotes, getSocialProfile, getSocialReel, getSocialReelComments, getSocialReelMedia, getSocialReelUploadLimits, getTypingStatus, listCallSignals, listConversations, listFriendRequests, listMessages, listReels, maxMessageAudioBytes, maxMessageImageBytes, maxReelMediaBytes, pinSocialReelComment, respondToFriendRequest, saveSocialNote, saveSocialProfile, searchSocialProfiles, sendAudioMessage, sendCallSignal, sendFriendRequest, sendImageMessage, sendMessage, setTypingStatus, toggleFollow, toggleReelLike } from "../controllers/socialController.js";
 import { deleteMyReel, getMyReelAnalytics, listMyReels, recordMyReelEvent, toggleMyReelSave, updateMyReelPrivacy } from "../controllers/reelAnalyticsController.js";
 
 export const socialRoutes = Router();
-socialRoutes.use(requireAuth);
+socialRoutes.use(requireAuth, ensureSocialAccount);
 socialRoutes.get("/profile", getSocialProfile);
 socialRoutes.put("/profile", saveSocialProfile);
 socialRoutes.get("/notes", getSocialNotes);

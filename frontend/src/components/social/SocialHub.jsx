@@ -5,10 +5,12 @@ import { getCallSignals, getFriendRequests, getSocialConversations, getSocialMes
 import "./SocialHub.css";
 import ReelsExperience from "./ReelsExperience";
 import { ReelsStateProvider } from "./ReelsState";
+import VerifiedBadge from "./VerifiedBadge";
 
 const CallAudio = Capacitor.registerPlugin("CallAudio");
 
 const usernamePattern = /^[a-z0-9._]{3,30}$/;
+const emptyProfile = { username:"", displayName:"", bio:"", avatarUrl:null };
 const NOTE_TTL_MS = 25 * 60 * 60 * 1000;
 const MAX_MESSAGE_IMAGE_BYTES = 50 * 1024 * 1024;
 const MAX_MESSAGE_AUDIO_BYTES = 5 * 1024 * 1024;
@@ -26,13 +28,19 @@ function Avatar({ name, src, size = 42 }) {
   return src ? <img src={src} alt="" style={{ width:size, height:size, borderRadius:"50%", objectFit:"cover", background:C.surface }} /> : <div aria-hidden="true" style={{ width:size, height:size, borderRadius:"50%", display:"grid", placeItems:"center", background:"#DBEAFE", color:C.primary, fontWeight:800 }}>{initials(name)}</div>;
 }
 
+function MessageBody({ body }) {
+  return body.split(/(https?:\/\/[^\s]+)/g).map((part, index) => /^https?:\/\//.test(part)
+    ? <a key={index} href={part} target="_blank" rel="noreferrer">{part}</a>
+    : <span key={index}>{part}</span>);
+}
+
 function CallIcon({ type }) {
   if (type === "video") return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M15 8.5h1.2l4.3-2.5v12l-4.3-2.5H15zM3 7.5h12v9H3z" /></svg>;
   if (type === "hangup") return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m5.1 8.7 2.2 2.2a1 1 0 0 0 1.1.2l1.5-.6a1 1 0 0 1 1.1.2l2 2a1 1 0 0 1 .2 1.1l-.6 1.5a1 1 0 0 0 .2 1.1l2.2 2.2a1 1 0 0 0 1.3.1l2-1.6a1 1 0 0 0 .2-1.3C15.6 9 15 8.4 7.2 4.5a1 1 0 0 0-1.3.2l-1.6 2a1 1 0 0 0 .1 1.3Z" /><path d="m4 4 16 16" /></svg>;
   return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5.1 4.8a2 2 0 0 1 2.8-.1l2 1.8a2 2 0 0 1 .4 2.5L9.2 10a15 15 0 0 0 4.8 4.8l1-1.1a2 2 0 0 1 2.5-.4l1.8 2a2 2 0 0 1-.1 2.8l-1 1a2 2 0 0 1-2.1.4A17 17 0 0 1 4.7 8a2 2 0 0 1 .4-2.1z" /></svg>;
 }
 
-function AccountSetup({ onSaved, initial }) {
+function AccountSetup({ onSaved, initial, isGymOwner }) {
   const [form, setForm] = useState(initial || emptyProfile);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -47,7 +55,7 @@ function AccountSetup({ onSaved, initial }) {
   };
   return <div style={{ maxWidth:460, margin:"30px auto", background:C.card, border:`1px solid ${C.border}`, borderRadius:16, padding:22 }}>
     <div style={{ fontSize:32, marginBottom:8 }}>✦</div>
-    <h1 style={{ margin:"0 0 6px", color:C.dark, fontFamily:"'Barlow Condensed',sans-serif", fontSize:28 }}>Create your Movora ID</h1>
+    <h1 style={{ margin:"0 0 6px", color:C.dark, fontFamily:"'Barlow Condensed',sans-serif", fontSize:28 }}>{isGymOwner ? "Create your gym's Movora profile" : "Create your Movora ID"}{isGymOwner && <VerifiedBadge accountType="gym_owner" />}</h1>
     <p style={{ margin:"0 0 20px", color:C.muted, fontSize:14 }}>Choose a unique ID so people can find you by username or display name.</p>
     {error && <div role="alert" style={{ marginBottom:14, padding:11, borderRadius:8, background:"#FEF2F2", color:"#991B1B", fontSize:13 }}>{error}</div>}
     <form onSubmit={submit} style={{ display:"grid", gap:12 }}>
@@ -294,7 +302,7 @@ export function CallPanel({ person, onError, incomingOnly = false }) {
           if (item.signal_type === "offer" && (!incomingCallId || (callIdRef.current && incomingCallId !== callIdRef.current))) continue;
           if (item.signal_type === "offer" && !peerRef.current && phaseRef.current === "idle" && incomingOnly) {
             callIdRef.current = incomingCallId;
-            setActivePerson({ user_id:item.sender_id, username:item.sender_username, display_name:item.sender_display_name || "Movora member", avatar_url:item.sender_avatar_url });
+            setActivePerson({ user_id:item.sender_id, username:item.sender_username, display_name:item.sender_display_name || "Movora member", avatar_url:item.sender_avatar_url, account_type:item.sender_account_type });
             incomingOfferRef.current = item.payload;
             setMediaType(item.payload.mediaType || "audio");
             setPhase("incoming");
@@ -386,6 +394,10 @@ function MessageImage({ conversationId, message, previewUrl, onOpen }) {
 function MessageAudio({ conversationId, message, previewBlob }) {
   const [audioUrl, setAudioUrl] = useState("");
   const [audioError, setAudioError] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [duration, setDuration] = useState(0);
+  const [currentTime, setCurrentTime] = useState(0);
+  const audioRef = useRef(null);
   useEffect(() => {
     if (previewBlob) {
       const objectUrl = URL.createObjectURL(previewBlob);
@@ -413,7 +425,73 @@ function MessageAudio({ conversationId, message, previewBlob }) {
   }, [conversationId, message.id, message.pending, previewBlob]);
   if (audioError) return <span className="message-image-error">Voice note unavailable</span>;
   if (!audioUrl) return <span className="message-image-loading">Loading voice note…</span>;
-  return <audio className="message-audio-player" controls preload="metadata" src={audioUrl} aria-label="Voice note" />;
+  const formatDuration = seconds => {
+    if (!Number.isFinite(seconds)) return "0:00";
+    return `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, "0")}`;
+  };
+  const progress = duration > 0 ? currentTime / duration : 0;
+  const togglePlayback = async () => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (audio.paused) {
+      try {
+        await audio.play();
+        setIsPlaying(true);
+      } catch {
+        setAudioError(true);
+      }
+    } else {
+      audio.pause();
+      setIsPlaying(false);
+    }
+  };
+  const seekToPointer = event => {
+    const audio = audioRef.current;
+    if (!audio || !duration) return;
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const ratio = Math.max(0, Math.min(1, (event.clientX - bounds.left) / bounds.width));
+    audio.currentTime = ratio * duration;
+    setCurrentTime(audio.currentTime);
+  };
+  const waveform = [10, 14, 8, 12, 18, 11, 22, 30, 39, 51, 64, 76, 88, 78, 68, 57, 72, 83, 70, 59, 75, 66, 53, 71, 62, 48, 57, 69, 54, 43, 61, 50, 38, 29, 18, 12];
+  return <div className="message-audio-player">
+    <audio
+      ref={audioRef}
+      preload="metadata"
+      src={audioUrl}
+      onLoadedMetadata={event => setDuration(event.currentTarget.duration)}
+      onDurationChange={event => setDuration(event.currentTarget.duration)}
+      onTimeUpdate={event => setCurrentTime(event.currentTarget.currentTime)}
+      onEnded={() => { setIsPlaying(false); setCurrentTime(0); }}
+      onError={() => setAudioError(true)}
+    />
+    <button type="button" className="message-audio-play" onClick={togglePlayback} aria-label={isPlaying ? "Pause voice note" : "Play voice note"}>
+      {isPlaying
+        ? <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5h4v14H7zM15 5h4v14h-4z"/></svg>
+        : <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.8v14.4L19 12 7 4.8Z"/></svg>}
+    </button>
+    <div
+      className="message-audio-waveform"
+      role="slider"
+      tabIndex={0}
+      aria-label="Voice note playback position"
+      aria-valuemin={0}
+      aria-valuemax={duration || 0}
+      aria-valuenow={currentTime}
+      onClick={seekToPointer}
+      onKeyDown={event => {
+        if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+        event.preventDefault();
+        const audio = audioRef.current;
+        if (!audio || !duration) return;
+        audio.currentTime = Math.max(0, Math.min(duration, audio.currentTime + (event.key === "ArrowRight" ? 5 : -5)));
+        setCurrentTime(audio.currentTime);
+      }}
+    >
+      {waveform.map((height, index) => <i key={index} className={progress >= (index + 1) / waveform.length ? "played" : ""} style={{ height:`${height}%` }}/>)}
+    </div>
+    <span className="message-audio-duration">{formatDuration(duration)}</span>
+  </div>;
 }
 
 function Messages({ profile }) {
@@ -878,24 +956,24 @@ function Messages({ profile }) {
       </section>
     </div>}
     <div className="messages-heading"><div><h1>Messages</h1><p>Train together, stay connected.</p></div><div className="messages-heading-actions">{noteOpen && <button type="button" className="note-save-action" onClick={saveNote}>Done</button>}<button type="button" className="requests-button" onClick={() => setRequestsOpen(current => !current)} aria-expanded={requestsOpen}>Requests{requests.incoming.filter(request => request.status === "pending").length > 0 && <span>{requests.incoming.filter(request => request.status === "pending").length}</span>}</button></div></div>
-    {requestsOpen && <div className="requests-panel"><div className="requests-panel-heading"><strong>Friend requests</strong><button type="button" onClick={() => setRequestsOpen(false)} aria-label="Close friend requests">×</button></div>{requests.incoming.length > 0 ? <div className="request-group"><div className="request-label">Incoming</div>{requests.incoming.map(request => <div className="request-row" key={request.id}><Avatar name={request.display_name} src={request.avatar_url} size={38}/><div className="person-copy"><strong>{request.display_name}</strong><span>@{request.username}</span></div>{request.status === "pending" ? <button type="button" className="request-accept" disabled={requestAction === request.id} onClick={() => respondToRequest(request.id, "accepted", request.user_id)}>{requestAction === request.id ? "Accepting..." : "Accept"}</button> : <span className="request-pending">Accepted</span>}{request.following ? <span className="request-pending">Following</span> : <button type="button" className="request-accept" disabled={requestAction === request.user_id} onClick={() => followBack(request.user_id)}>{requestAction === request.user_id ? "Following..." : "Follow back"}</button>}</div>)}</div> : <p className="requests-empty">No incoming requests.</p>}{requests.outgoing.length > 0 && <div className="request-group"><div className="request-label">Sent</div>{requests.outgoing.map(request => <div className="request-row" key={request.id}><Avatar name={request.display_name} src={request.avatar_url} size={38}/><div className="person-copy"><strong>{request.display_name}</strong><span>@{request.username}</span></div><span className="request-pending">{request.status === "accepted" ? "Accepted" : "Pending"}</span></div>)}</div>}</div>}
+    {requestsOpen && <div className="requests-panel"><div className="requests-panel-heading"><strong>Friend requests</strong><button type="button" onClick={() => setRequestsOpen(false)} aria-label="Close friend requests">×</button></div>{requests.incoming.length > 0 ? <div className="request-group"><div className="request-label">Incoming</div>{requests.incoming.map(request => <div className="request-row" key={request.id}><Avatar name={request.display_name} src={request.avatar_url} size={38}/><div className="person-copy"><strong>{request.display_name} <VerifiedBadge accountType={request.account_type}/></strong><span>@{request.username}</span></div>{request.status === "pending" ? <button type="button" className="request-accept" disabled={requestAction === request.id} onClick={() => respondToRequest(request.id, "accepted", request.user_id)}>{requestAction === request.id ? "Accepting..." : "Accept"}</button> : <span className="request-pending">Accepted</span>}{request.following ? <span className="request-pending">Following</span> : <button type="button" className="request-accept" disabled={requestAction === request.user_id} onClick={() => followBack(request.user_id)}>{requestAction === request.user_id ? "Following..." : "Follow back"}</button>}</div>)}</div> : <p className="requests-empty">No incoming requests.</p>}{requests.outgoing.length > 0 && <div className="request-group"><div className="request-label">Sent</div>{requests.outgoing.map(request => <div className="request-row" key={request.id}><Avatar name={request.display_name} src={request.avatar_url} size={38}/><div className="person-copy"><strong>{request.display_name} <VerifiedBadge accountType={request.account_type}/></strong><span>@{request.username}</span></div><span className="request-pending">{request.status === "accepted" ? "Accepted" : "Pending"}</span></div>)}</div>}</div>}
     <div className="messages-search"><div className="search-field"><span aria-hidden="true">⌕</span><input id="people-search" aria-label="Search by username or name" value={query} onChange={e => setQuery(e.target.value)} placeholder="Search by @username or name" /></div></div>
     <div className="discover-row" aria-label="Discover people">
       <button type="button" className={`discover-item note-trigger${noteOpen ? " is-hidden" : ""}`} onClick={openNote} aria-label={note ? `Edit your note: ${note}` : "Write your note"}><div className="note-cloud-wrap">{note && <span className="note-cloud">{note}</span>}<div className="discover-avatar discover-note"><span>✦</span></div></div><strong>Your note</strong></button>
-      {friendNotes.map(friendNote => <button type="button" className="discover-item friend-note-item" key={friendNote.user_id} onClick={() => setSelectedNote(friendNote)} aria-label={`Read ${friendNote.display_name}'s note`}><div className="note-cloud-wrap"><span className="note-cloud friend-note-cloud">{friendNote.text}</span><Avatar name={friendNote.display_name} src={friendNote.avatar_url} size={62}/></div><strong>{friendNote.display_name}</strong></button>)}
+      {friendNotes.map(friendNote => <button type="button" className="discover-item friend-note-item" key={friendNote.user_id} onClick={() => setSelectedNote(friendNote)} aria-label={`Read ${friendNote.display_name}'s note`}><div className="note-cloud-wrap"><span className="note-cloud friend-note-cloud">{friendNote.text}</span><Avatar name={friendNote.display_name} src={friendNote.avatar_url} size={62}/></div><strong>{friendNote.display_name}<VerifiedBadge accountType={friendNote.account_type}/></strong></button>)}
     </div>
     {noteOpen && <div className="note-overlay"><div className="note-composer" role="dialog" aria-label="Write your note"><div className="discover-avatar discover-note"><span>✦</span></div><input ref={noteInputRef} className="note-input" value={noteDraft} onChange={event => setNoteDraft(event.target.value.slice(0, 80))} maxLength={80} placeholder="What are you up to?" aria-label="Your note" /></div></div>}
-    {selectedNote && <div className="note-overlay" onClick={() => setSelectedNote(null)}><div className="note-viewer" role="dialog" aria-label={`${selectedNote.display_name}'s note`} onClick={event => event.stopPropagation()}><Avatar name={selectedNote.display_name} src={selectedNote.avatar_url} size={76}/><strong>{selectedNote.display_name}</strong><p>{selectedNote.text}</p><button type="button" onClick={() => setSelectedNote(null)}>Close</button></div></div>}
+    {selectedNote && <div className="note-overlay" onClick={() => setSelectedNote(null)}><div className="note-viewer" role="dialog" aria-label={`${selectedNote.display_name}'s note`} onClick={event => event.stopPropagation()}><Avatar name={selectedNote.display_name} src={selectedNote.avatar_url} size={76}/><strong>{selectedNote.display_name}<VerifiedBadge accountType={selectedNote.account_type}/></strong><p>{selectedNote.text}</p><button type="button" onClick={() => setSelectedNote(null)}>Close</button></div></div>}
     {error && !attachment && <div role="alert" className="messages-error">{error}</div>}
-    {results.length > 0 && <div className="people-results"><div className="section-label">People</div>{results.map(user => <div className="person-result" key={user.user_id}><Avatar name={user.display_name} src={user.avatar_url} size={46}/><div className="person-copy"><strong>{user.display_name}</strong><span>@{user.username} · {user.followers} followers</span></div>{user.request_status === "accepted" ? <button type="button" className="message-button" onClick={() => chooseUser(user)}>Message</button> : user.request_status === "outgoing_pending" ? <span className="request-pending">Requested</span> : user.request_status === "incoming_pending" ? <button type="button" className="request-accept" onClick={() => refreshRequests().then(() => setRequestsOpen(true))}>Review request</button> : <button type="button" className="message-button" onClick={() => requestUser(user)}>Add friend</button>}</div>)}</div>}
+    {results.length > 0 && <div className="people-results"><div className="section-label">People</div>{results.map(user => <div className={`person-result${user.account_type === "gym_owner" ? " gym-owner-result" : ""}`} key={user.user_id}><span className={`person-avatar-frame${user.account_type === "gym_owner" ? " gym-owner-avatar-frame" : ""}`}><Avatar name={user.display_name} src={user.avatar_url} size={46}/></span><div className="person-copy"><strong>{user.display_name} <VerifiedBadge accountType={user.account_type}/></strong><span>@{user.username} · {user.followers} followers</span></div>{user.request_status === "accepted" ? <button type="button" className="message-button" onClick={() => chooseUser(user)}>Message</button> : user.request_status === "outgoing_pending" ? <span className="request-pending">Requested</span> : user.request_status === "incoming_pending" ? <button type="button" className="request-accept" onClick={() => refreshRequests().then(() => setRequestsOpen(true))}>Review request</button> : <button type="button" className="message-button" onClick={() => requestUser(user)}>Add friend</button>}</div>)}</div>}
     <div className={`inbox-layout${selected ? " has-selection" : ""}`}>
-      <section className="conversation-list"><div className="inbox-title"><h2>Chats</h2><span>{chatRows.length || ""}</span></div>{chatRows.length === 0 ? <div className="empty-chats"><span>○</span><p>Your conversations will appear here.</p><small>Search above to find a training partner.</small></div> : chatRows.map((chat, index) => <button className={`conversation-row${selected?.user_id === chat.user_id ? " active" : ""}`} key={chat.id || chat.user_id || index} type="button" onClick={() => { setMessages([]); setSelected({ ...chat, user_id:chat.user_id, newChat:!chat.id }); }}><Avatar name={chat.display_name} src={chat.avatar_url} size={50}/><span className="conversation-copy"><strong>{chat.display_name}</strong><small>@{chat.username}</small></span><span className="conversation-arrow">›</span></button>)}</section>
+      <section className="conversation-list"><div className="inbox-title"><h2>Chats</h2><span>{chatRows.length || ""}</span></div>{chatRows.length === 0 ? <div className="empty-chats"><span>○</span><p>Your conversations will appear here.</p><small>Search above to find a training partner.</small></div> : chatRows.map((chat, index) => <button className={`conversation-row${selected?.user_id === chat.user_id ? " active" : ""}`} key={chat.id || chat.user_id || index} type="button" onClick={() => { setMessages([]); setSelected({ ...chat, user_id:chat.user_id, newChat:!chat.id }); }}><Avatar name={chat.display_name} src={chat.avatar_url} size={50}/><span className="conversation-copy"><strong>{chat.display_name} <VerifiedBadge accountType={chat.account_type}/></strong><small>@{chat.username}</small></span><span className="conversation-arrow">›</span></button>)}</section>
       {selected && <section className="conversation-panel">
-        <div className="conversation-header"><button className="back-button" type="button" onClick={() => setSelected(null)} aria-label="Back to chats">‹</button><Avatar name={selected.display_name} src={selected.avatar_url} size={42}/><div><strong>{selected.display_name}</strong><small>@{selected.username}</small></div></div>
+        <div className="conversation-header"><button className="back-button" type="button" onClick={() => setSelected(null)} aria-label="Back to chats">‹</button><Avatar name={selected.display_name} src={selected.avatar_url} size={42}/><div><strong>{selected.display_name} <VerifiedBadge accountType={selected.account_type}/></strong><small>@{selected.username}</small></div></div>
         <CallPanel person={selected} onError={setError}/>
         <div className="message-history" ref={messageHistoryRef}>
           {messages.length === 0 && <div className="new-conversation">Start a conversation with <strong>{selected.display_name}</strong>.</div>}
-          {messages.map(message => <div className={`message-bubble${message.sender_id === profile.user_id ? " mine" : ""}`} key={message.id}>
+          {messages.map(message => <div className={`message-bubble${message.sender_id === profile.user_id ? " mine" : ""}${message.media_type?.startsWith("audio/") ? " voice-note-bubble" : ""}`} key={message.id}>
             {message.media_type?.startsWith("image/") && <MessageImage conversationId={selected.id} message={message} previewUrl={message.localPreviewUrl} onOpen={(src, name) => setExpandedImage({ src, name })}/>}
                 {message.media_type?.startsWith("audio/") && <MessageAudio conversationId={selected.id} message={message} previewBlob={message.localAudioBlob}/>}
                 {!!message.body && <MessageBody body={message.body}/>}
@@ -936,11 +1014,31 @@ function Messages({ profile }) {
   </div>;
 }
 
-export default function SocialHub({ mode, user }) {
+export default function SocialHub({ mode, user, onExit }) {
   const [profile, setProfile] = useState(undefined);
   const [loading, setLoading] = useState(true);
-  useEffect(() => { getSocialProfile().then(setProfile).catch(() => setProfile(null)).finally(() => setLoading(false)); }, []);
+  const [loadError, setLoadError] = useState("");
+  const [reloadKey, setReloadKey] = useState(0);
+  const isGymOwner = user.accountType === "gym_owner";
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setLoadError("");
+    getSocialProfile()
+      .then(data => { if (active) setProfile(data); })
+      .catch(err => { if (active) setLoadError(err.message || "Unable to load your Movora social profile."); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [reloadKey]);
   if (loading) return <div style={{ padding:50, textAlign:"center", color:C.muted }}>Loading Movora social...</div>;
-  if (!profile) return <AccountSetup initial={{ ...emptyProfile, displayName:user.name }} onSaved={setProfile}/>;
-  return mode === "reels" ? <ReelsExperience/> : <Messages profile={profile}/>;
+  if (loadError) return <div role="alert" style={{ maxWidth:460, margin:"30px auto", padding:20, borderRadius:12, background:"#FEF2F2", color:"#991B1B" }}>{loadError}<button type="button" onClick={() => setReloadKey(current => current + 1)} style={{ display:"block", marginTop:12, border:0, borderRadius:8, padding:"9px 13px", background:C.primary, color:"#fff", fontWeight:700, cursor:"pointer" }}>Try again</button></div>;
+  if (!profile) return <AccountSetup initial={{ ...emptyProfile, displayName:user.gymName || user.name }} isGymOwner={isGymOwner} onSaved={setProfile}/>;
+  return <ReelsStateProvider>
+    <div>
+      <div hidden={mode !== "reels"}>
+        <ReelsExperience onExit={onExit} visible={mode === "reels"}/>
+      </div>
+      {mode === "messages" && <Messages profile={profile}/>}
+    </div>
+  </ReelsStateProvider>;
 }

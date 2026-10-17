@@ -733,8 +733,9 @@ export default function App({ user, onLogout, sharedReel }) {
 
         {tab==="check-in" && <CheckInScreen onClose={() => setTab("dashboard")} />}
 
-        {tab==="reels" && <SocialHub key={sharedReel?.version || 0} mode="reels" user={user} onExit={() => setTab("dashboard")} />}
-        {tab==="messages" && <SocialHub mode="messages" user={user} />}
+        <div style={{ display:tab === "reels" || tab === "messages" ? "block" : "none" }}>
+          <SocialHub mode={tab === "reels" ? "reels" : "messages"} user={user} onExit={() => setTab("dashboard")} />
+        </div>
 
         {/* ── STATS (History + Progress) ── */}
         {tab==="stats" && (

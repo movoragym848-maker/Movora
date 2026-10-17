@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { getGymMembers, getGymAttendance, sendMemberReminder, renewGymMember, addGymMember, updateGymMember, cancelGymMember } from "../../services/api";
 import { MEMBERSHIP_PLANS } from "../../constants/membership";
 import SettingsPagesModal from "../common/SettingsPagesModal";
+import SocialHub from "../social/SocialHub";
 import StaffPanel from "./StaffPanel";
 
 
@@ -236,9 +237,10 @@ const MemberActionIcon = ({ type }) => {
   return <svg {...commonProps} fill="currentColor" stroke="none"><circle cx="12" cy="5" r="1.5" /><circle cx="12" cy="12" r="1.5" /><circle cx="12" cy="19" r="1.5" /></svg>;
 };
 
-export default function GymOwnerDashboard({ gymOwner, onLogout }) {
+export default function GymOwnerDashboard({ gymOwner, onLogout, sharedReel }) {
   const isDemoGymOwner = gymOwner?.email === DEMO_GYM_OWNER_EMAIL;
-  const [activeTab, setActiveTab] = useState("admin"); // "admin", "members", "attendance", "staff", or "profile"
+  const [activeTab, setActiveTab] = useState("admin");
+  const [managementTab, setManagementTab] = useState("members");
   const [members, setMembers] = useState(() => {
     // Initialize with demo data if it's a demo account
     if (isDemoGymOwner) return generateDemoMembers(true);
@@ -288,6 +290,9 @@ export default function GymOwnerDashboard({ gymOwner, onLogout }) {
   const [attendanceLoading, setAttendanceLoading] = useState(false);
   const [attendanceError, setAttendanceError] = useState("");
 
+  useEffect(() => {
+    if (sharedReel?.id) setActiveTab("reels");
+  }, [sharedReel]);
 
   const fetchMembersList = async () => {
     setLoading(true);
@@ -342,7 +347,7 @@ export default function GymOwnerDashboard({ gymOwner, onLogout }) {
   }, []);
 
   useEffect(() => {
-    if (activeTab !== "attendance") return;
+    if (activeTab !== "management" || managementTab !== "attendance") return;
     if (!isValidDateValue(attendanceDate)) return;
 
     let cancelled = false;
@@ -364,7 +369,7 @@ export default function GymOwnerDashboard({ gymOwner, onLogout }) {
       });
 
     return () => { cancelled = true; };
-  }, [activeTab, attendanceDate]);
+  }, [activeTab, managementTab, attendanceDate]);
 
 
   // Filter members by query
@@ -1337,8 +1342,61 @@ export default function GymOwnerDashboard({ gymOwner, onLogout }) {
       {/* Main Content Area */}
       <div className="gym-content-wrapper" style={{ padding:"clamp(12px, 3vw, 20px)" }}>
 
-        {/* ── MEMBERS TAB ── */}
-        {activeTab === "members" && (
+        {activeTab === "management" && (
+          <div
+            role="tablist"
+            aria-label="Management sections"
+            style={{
+              display:"flex",
+              gap:8,
+              padding:8,
+              marginBottom:20,
+              borderRadius:16,
+              background:"#EEF4FF",
+              overflowX:"auto"
+            }}
+          >
+            {[
+              { id:"members", icon:"users", label:"Members" },
+              { id:"attendance", icon:"calendar", label:"Attendance" },
+              { id:"staff", icon:"user-plus", label:"Staff" }
+            ].map(({ id, icon, label }) => (
+              <button
+                key={id}
+                type="button"
+                role="tab"
+                aria-selected={managementTab === id}
+                onClick={() => setManagementTab(id)}
+                style={{
+                  flex:"1 0 0",
+                  minWidth:0,
+                  display:"flex",
+                  alignItems:"center",
+                  justifyContent:"center",
+                  gap:8,
+                  padding:"12px 10px",
+                  border:0,
+                  borderRadius:12,
+                  background:managementTab === id ? C.card : "transparent",
+                  color:managementTab === id ? C.primary : C.muted,
+                  boxShadow:managementTab === id ? "0 2px 8px rgba(31,41,55,0.06)" : "none",
+                  fontFamily:"'Barlow',sans-serif",
+                  fontSize:14,
+                  fontWeight:managementTab === id ? 700 : 500,
+                  whiteSpace:"nowrap",
+                  cursor:"pointer",
+                  transition:"all 0.2s ease"
+                }}
+              >
+                <i className={`ti ti-${icon}`} aria-hidden="true" style={{ fontSize:18 }} />
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* ── MANAGEMENT: MEMBERS ── */}
+        {activeTab === "management" && managementTab === "members" && (
           <>
             <div style={{ marginBottom:20 }}>
               <h1 style={{ color:C.dark, margin:"0 0 4px", display:"flex", alignItems:"center", justifyContent:"flex-start", gap:12, fontFamily:"'Barlow Condensed',sans-serif", fontSize:"clamp(22px, 6vw, 26px)", fontWeight:800 }}>
@@ -1714,8 +1772,8 @@ export default function GymOwnerDashboard({ gymOwner, onLogout }) {
           </>
         )}
 
-        {/* ── ATTENDANCE TAB ── */}
-        {activeTab === "attendance" && (
+        {/* ── MANAGEMENT: ATTENDANCE ── */}
+        {activeTab === "management" && managementTab === "attendance" && (
           <>
             <div style={{ marginBottom:20 }}>
               <h1 style={{ color:C.dark, margin:"0 0 4px", fontFamily:"'Barlow Condensed',sans-serif", fontSize:"clamp(22px, 6vw, 26px)", fontWeight:800 }}>
@@ -2143,7 +2201,15 @@ export default function GymOwnerDashboard({ gymOwner, onLogout }) {
           </>
         )}
 
-        {activeTab === "staff" && <StaffPanel />}
+        {activeTab === "management" && managementTab === "staff" && <StaffPanel />}
+
+        {(activeTab === "messages" || activeTab === "reels") && (
+          <SocialHub
+            mode={activeTab}
+            user={gymOwner}
+            onExit={() => setActiveTab("admin")}
+          />
+        )}
 
         {/* ── PROFILE TAB ── */}
         {activeTab === "profile" && (
@@ -3062,9 +3128,9 @@ export default function GymOwnerDashboard({ gymOwner, onLogout }) {
       >
         {[
           { id:"admin", icon:"dashboard", label:"Admin" },
-          { id:"members", icon:"users", label:"Members" },
-          { id:"attendance", icon:"calendar", label:"Attendance" },
-          { id:"staff", icon:"user-plus", label:"Staff" },
+          { id:"management", icon:"layout-dashboard", label:"Management" },
+          { id:"reels", icon:"video", label:"Reels" },
+          { id:"messages", icon:"message-circle", label:"Messages" },
           { id:"profile", icon:"user", label:"Profile" }
         ].map(({ id, icon, label }) => (
           <button 
