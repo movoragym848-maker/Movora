@@ -3,6 +3,9 @@ import { getGymMembers, getGymAttendance, sendMemberReminder, renewGymMember, ad
 import { MEMBERSHIP_PLANS } from "../../constants/membership";
 import SettingsPagesModal from "../common/SettingsPagesModal";
 import SocialHub from "../social/SocialHub";
+import ProfilePostsGallery from "../social/ProfilePostsGallery";
+import PostAnalyticsDetail from "../social/PostAnalyticsDetail";
+import GymOwnerSocialProfile from "./GymOwnerSocialProfile";
 import StaffPanel from "./StaffPanel";
 
 
@@ -241,6 +244,8 @@ export default function GymOwnerDashboard({ gymOwner, onLogout, sharedReel }) {
   const isDemoGymOwner = gymOwner?.email === DEMO_GYM_OWNER_EMAIL;
   const [activeTab, setActiveTab] = useState("admin");
   const [managementTab, setManagementTab] = useState("members");
+  const [profileSubpage, setProfileSubpage] = useState("");
+  const [selectedProfilePostId, setSelectedProfilePostId] = useState("");
   const [members, setMembers] = useState(() => {
     // Initialize with demo data if it's a demo account
     if (isDemoGymOwner) return generateDemoMembers(true);
@@ -2211,8 +2216,18 @@ export default function GymOwnerDashboard({ gymOwner, onLogout, sharedReel }) {
           />
         )}
 
+        {activeTab === "profile" && profileSubpage === "gallery" && <ProfilePostsGallery
+          onBack={() => setProfileSubpage("")}
+          onSelectPost={post => { setSelectedProfilePostId(post.id); setProfileSubpage("analytics"); }}
+        />}
+        {activeTab === "profile" && profileSubpage === "analytics" && selectedProfilePostId && <PostAnalyticsDetail
+          reelId={selectedProfilePostId}
+          onBack={() => setProfileSubpage("gallery")}
+          onDeleted={() => { setSelectedProfilePostId(""); setProfileSubpage("gallery"); }}
+        />}
+
         {/* ── PROFILE TAB ── */}
-        {activeTab === "profile" && (
+        {activeTab === "profile" && !profileSubpage && (
           <>
             <div style={{ marginBottom:22 }}>
               <h1 style={{ color:C.dark, margin:"0 0 4px", fontFamily:"'Barlow Condensed',sans-serif", fontSize:26, fontWeight:800 }}>
@@ -2222,6 +2237,12 @@ export default function GymOwnerDashboard({ gymOwner, onLogout, sharedReel }) {
                 View and manage your account.
               </p>
             </div>
+
+            <GymOwnerSocialProfile
+              gymOwner={gymOwner}
+              onCreateProfile={() => setActiveTab("messages")}
+              onViewPosts={() => setProfileSubpage("gallery")}
+            />
 
             <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
               <button 
