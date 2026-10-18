@@ -140,6 +140,16 @@ app.add_middleware(
 )
 
 
+@app.get("/")
+def root() -> dict[str, str]:
+    return {"status": "Movora Backend is running"}
+
+
+@app.get("/debug/routes")
+def debug_routes() -> list[dict[str, str]]:
+    return [{"path": route.path, "name": route.name} for route in app.routes]
+
+
 @app.get("/api/reels", response_model=FeedResponse)
 def list_reels(
     cursor: str | None = Query(default=None),

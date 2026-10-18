@@ -17,7 +17,7 @@ from pydantic import ValidationError
 from starlette.datastructures import Headers
 from starlette.datastructures import UploadFile
 
-from main import app
+from main import app, debug_routes, root
 from routers.marketing import (
     MAX_CREATIVE_BYTES,
     amount_to_charge_paise,
@@ -70,6 +70,12 @@ class CampaignPriceTests(unittest.TestCase):
 
 class CampaignRouteTests(unittest.TestCase):
     """Ensure frontend marketing URLs are registered by the FastAPI application."""
+
+    def test_root_and_debug_routes_report_application_status_and_paths(self) -> None:
+        self.assertEqual(root(), {"status": "Movora Backend is running"})
+        routes = debug_routes()
+        self.assertIn({"path": "/debug/routes", "name": "debug_routes"}, routes)
+        self.assertIn({"path": "/api/v1/marketing/campaigns/creative", "name": "upload_campaign_creative"}, routes)
 
     def test_registers_campaign_creation_upload_and_execution_routes(self) -> None:
         post_routes = {
