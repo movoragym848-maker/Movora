@@ -1,41 +1,22 @@
-"""FastAPI read API for Movora's shared social reels feed."""
+"""FastAPI service for Movora's social feed and gym-owner marketing."""
 
 from __future__ import annotations
 
 import base64
 import json
-import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from typing import Generator
 from uuid import UUID, uuid4
 
-from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from sqlalchemy import DateTime, Integer, LargeBinary, String, Text, Uuid, create_engine, desc, func, or_, select, tuple_
-from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
+from sqlalchemy import DateTime, Integer, LargeBinary, String, Text, Uuid, desc, func, or_, select, tuple_
+from sqlalchemy.orm import Mapped, Session, mapped_column
 
-load_dotenv()
-
-
-def _database_url() -> str:
-    value = os.environ.get("DATABASE_URL", "").strip()
-    if not value:
-        raise RuntimeError("DATABASE_URL must be configured")
-    if value.startswith("postgres://"):
-        return value.replace("postgres://", "postgresql+psycopg://", 1)
-    if value.startswith("postgresql://"):
-        return value.replace("postgresql://", "postgresql+psycopg://", 1)
-    return value
-
-
-engine = create_engine(_database_url(), pool_pre_ping=True, pool_recycle=1800)
-SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
-
-
-class Base(DeclarativeBase):
-    pass
+from db.database import Base, get_session
+from models import marketing as marketing_models
+from routers.marketing import router as marketing_router
 
 
 class Reels(Base):
@@ -126,11 +107,6 @@ class FeedResponse(BaseModel):
     has_more: bool
 
 
-def get_session() -> Generator[Session, None, None]:
-    with SessionLocal() as session:
-        yield session
-
-
 def encode_cursor(reel: Reels) -> str:
     payload = json.dumps({"created_at": reel.created_at.isoformat(), "id": reel.id}).encode()
     return base64.urlsafe_b64encode(payload).decode().rstrip("=")
@@ -153,7 +129,15 @@ async def lifespan(_app: FastAPI):
     yield
 
 
-app = FastAPI(title="Movora Reels API", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="Movora API", version="1.0.0", lifespan=lifespan)
+app.include_router(marketing_router)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.get("/api/reels", response_model=FeedResponse)

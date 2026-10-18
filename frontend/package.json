@@ -13,6 +13,7 @@
     "@vitejs/plugin-react": "latest",
     "hls.js": "^1.7.3",
     "html5-qrcode": "^2.3.8",
+    "lucide-react": "^1.59.0",
     "react": "latest",
     "react-dom": "latest",
     "recharts": "latest",

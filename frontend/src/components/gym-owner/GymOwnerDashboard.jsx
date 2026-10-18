@@ -7,6 +7,7 @@ import ProfilePostsGallery from "../social/ProfilePostsGallery";
 import PostAnalyticsDetail from "../social/PostAnalyticsDetail";
 import GymOwnerSocialProfile from "./GymOwnerSocialProfile";
 import StaffPanel from "./StaffPanel";
+import MarketingCenter from "./MarketingCenter";
 
 
 const MEMBERSHIP_FEE = 1000; // Rs per month
@@ -242,8 +243,9 @@ const MemberActionIcon = ({ type }) => {
 
 export default function GymOwnerDashboard({ gymOwner, onLogout, sharedReel }) {
   const isDemoGymOwner = gymOwner?.email === DEMO_GYM_OWNER_EMAIL;
-  const [activeTab, setActiveTab] = useState("admin");
+  const [activeTab, setActiveTab] = useState(() => window.location.pathname.startsWith("/marketing") ? "marketing" : "admin");
   const [managementTab, setManagementTab] = useState("members");
+  const [socialTab, setSocialTab] = useState("reels");
   const [profileSubpage, setProfileSubpage] = useState("");
   const [selectedProfilePostId, setSelectedProfilePostId] = useState("");
   const [members, setMembers] = useState(() => {
@@ -296,7 +298,20 @@ export default function GymOwnerDashboard({ gymOwner, onLogout, sharedReel }) {
   const [attendanceError, setAttendanceError] = useState("");
 
   useEffect(() => {
-    if (sharedReel?.id) setActiveTab("reels");
+    const syncMarketingRoute = () => {
+      setActiveTab(window.location.pathname.startsWith("/marketing") ? "marketing" : currentTab =>
+        currentTab === "marketing" ? "admin" : currentTab
+      );
+    };
+    window.addEventListener("popstate", syncMarketingRoute);
+    return () => window.removeEventListener("popstate", syncMarketingRoute);
+  }, []);
+
+  useEffect(() => {
+    if (sharedReel?.id) {
+      setSocialTab("reels");
+      setActiveTab("social");
+    }
   }, [sharedReel]);
 
   const fetchMembersList = async () => {
@@ -1345,7 +1360,7 @@ export default function GymOwnerDashboard({ gymOwner, onLogout, sharedReel }) {
       </div>
 
       {/* Main Content Area */}
-      <div className="gym-content-wrapper" style={{ padding:"clamp(12px, 3vw, 20px)" }}>
+      <div className="gym-content-wrapper" style={{ padding:"clamp(12px, 3vw, 20px)", ...(activeTab === "marketing" ? { maxWidth:1240 } : {}) }}>
 
         {activeTab === "management" && (
           <div
@@ -1854,6 +1869,10 @@ export default function GymOwnerDashboard({ gymOwner, onLogout, sharedReel }) {
         )}
 
         {/* ── ADMIN TAB ── */}
+        {activeTab === "marketing" && (
+          <MarketingCenter gymOwner={gymOwner} />
+        )}
+
         {activeTab === "admin" && (
           <>
             <div style={{ marginBottom:22 }}>
@@ -2208,12 +2227,63 @@ export default function GymOwnerDashboard({ gymOwner, onLogout, sharedReel }) {
 
         {activeTab === "management" && managementTab === "staff" && <StaffPanel />}
 
-        {(activeTab === "messages" || activeTab === "reels") && (
-          <SocialHub
-            mode={activeTab}
-            user={gymOwner}
-            onExit={() => setActiveTab("admin")}
-          />
+        {activeTab === "social" && (
+          <>
+            <div
+              role="tablist"
+              aria-label="Social sections"
+              style={{
+                display:"flex",
+                gap:8,
+                padding:8,
+                marginBottom:20,
+                borderRadius:16,
+                background:"#EEF4FF",
+                overflowX:"auto"
+              }}
+            >
+              {[
+                { id:"reels", icon:"video", label:"Reels" },
+                { id:"messages", icon:"message-circle", label:"Messages" }
+              ].map(({ id, icon, label }) => (
+                <button
+                  key={id}
+                  type="button"
+                  role="tab"
+                  aria-selected={socialTab === id}
+                  onClick={() => setSocialTab(id)}
+                  style={{
+                    flex:"1 0 0",
+                    minWidth:0,
+                    display:"flex",
+                    alignItems:"center",
+                    justifyContent:"center",
+                    gap:8,
+                    padding:"12px 10px",
+                    border:0,
+                    borderRadius:12,
+                    background:socialTab === id ? C.card : "transparent",
+                    color:socialTab === id ? C.primary : C.muted,
+                    boxShadow:socialTab === id ? "0 2px 8px rgba(31,41,55,0.06)" : "none",
+                    fontFamily:"'Barlow',sans-serif",
+                    fontSize:14,
+                    fontWeight:socialTab === id ? 700 : 500,
+                    whiteSpace:"nowrap",
+                    cursor:"pointer",
+                    transition:"all 0.2s ease"
+                  }}
+                >
+                  <i className={`ti ti-${icon}`} aria-hidden="true" style={{ fontSize:18 }} />
+                  {label}
+                </button>
+              ))}
+            </div>
+            <SocialHub
+              mode={socialTab}
+              user={gymOwner}
+              onExit={() => setActiveTab("admin")}
+            />
+          </>
         )}
 
         {activeTab === "profile" && profileSubpage === "gallery" && <ProfilePostsGallery
@@ -2240,7 +2310,7 @@ export default function GymOwnerDashboard({ gymOwner, onLogout, sharedReel }) {
 
             <GymOwnerSocialProfile
               gymOwner={gymOwner}
-              onCreateProfile={() => setActiveTab("messages")}
+              onCreateProfile={() => { setSocialTab("messages"); setActiveTab("social"); }}
               onViewPosts={() => setProfileSubpage("gallery")}
             />
 
@@ -3150,13 +3220,20 @@ export default function GymOwnerDashboard({ gymOwner, onLogout, sharedReel }) {
         {[
           { id:"admin", icon:"dashboard", label:"Admin" },
           { id:"management", icon:"layout-dashboard", label:"Management" },
-          { id:"reels", icon:"video", label:"Reels" },
-          { id:"messages", icon:"message-circle", label:"Messages" },
+          { id:"marketing", icon:"speakerphone", label:"Marketing" },
+          { id:"social", icon:"users", label:"Social" },
           { id:"profile", icon:"user", label:"Profile" }
         ].map(({ id, icon, label }) => (
           <button 
             key={id} 
-            onClick={() => setActiveTab(id)}
+            onClick={() => {
+              setActiveTab(id);
+              if (id === "marketing") {
+                if (!window.location.pathname.startsWith("/marketing")) window.history.pushState({}, "", "/marketing");
+              } else if (window.location.pathname.startsWith("/marketing")) {
+                window.history.pushState({}, "", "/");
+              }
+            }}
             role="tab"
             aria-selected={activeTab === id}
             aria-label={label}

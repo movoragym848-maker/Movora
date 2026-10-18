@@ -61,9 +61,10 @@ async function refreshAccessToken() {
 
 export async function request(path, options = {}, retryCount = 0) {
   const session = JSON.parse(localStorage.getItem("rs_session") || localStorage.getItem("rs_gym_owner_session") || "null");
-  const headers = { "Content-Type": "application/json", ...(options.headers || {}) };
+  const isFormData = typeof FormData !== "undefined" && options.body instanceof FormData;
+  const headers = { ...(isFormData ? {} : { "Content-Type": "application/json" }), ...(options.headers || {}) };
   if (session?.accessToken) headers.Authorization = `Bearer ${session.accessToken}`;
-  const fullUrl = `${API_URL}${path}`;
+  const fullUrl = /^(?:https?:)?\/\//i.test(path) ? path : `${API_URL}${path}`;
   
   try {
     // Check network connectivity
@@ -89,7 +90,13 @@ export async function request(path, options = {}, retryCount = 0) {
     }
     
     if (!res.ok) {
-      const error = new Error(data.message || `Request failed (${res.status})`);
+      const marketingEndpointNotFound = res.status === 404
+        && fullUrl.includes("/api/v1/marketing/")
+        && (!data.detail || data.detail === "Not Found");
+      const message = marketingEndpointNotFound
+        ? `Marketing API endpoint not found at ${fullUrl}. Check that VITE_MARKETING_API_URL points to the deployed FastAPI marketing service.`
+        : data.message || data.detail || `Request failed (${res.status})`;
+      const error = new Error(message);
       error.data = data;
       error.status = res.status;
       error.url = fullUrl;
@@ -146,6 +153,23 @@ export const login = payload => request("/auth/login", { method:"POST", body:JSO
 export const signupGymOwner = payload => request("/gym-owners/signup", { method:"POST", body:JSON.stringify(payload) });
 export const loginGymOwner = payload => request("/gym-owners/login", { method:"POST", body:JSON.stringify(payload) });
 export const getGymMembers = () => request("/gym-owners/members");
+const MARKETING_API_URL = (import.meta.env?.VITE_MARKETING_API_URL || "").trim().replace(/\/+$/, "");
+const marketingApiOrigin = (MARKETING_API_URL || API_URL).replace(/\/api$/i, "");
+const marketingEndpoint = path => `${marketingApiOrigin}/api/v1/marketing${path}`;
+export const getGymCampaigns = gymId => request(marketingEndpoint(`/campaigns/gym/${encodeURIComponent(gymId)}`));
+export const createGymCampaign = payload => request(marketingEndpoint("/campaigns"), {
+  method:"POST",
+  body:JSON.stringify(payload),
+});
+export const uploadGymCampaignCreative = file => {
+  const body = new FormData();
+  body.append("file", file);
+  return request(marketingEndpoint("/campaigns/creative"), { method:"POST", body });
+};
+export const executeGymCampaign = (campaignId, payment) => request(marketingEndpoint(`/campaigns/${encodeURIComponent(campaignId)}/execute`), {
+  method:"POST",
+  body:JSON.stringify(payment),
+});
 export const getGymAttendance = date => request(`/gym-owners/attendance?date=${encodeURIComponent(date)}`);
 export const getGymStaff = () => request("/gym-owners/staff");
 export const addGymStaff = payload => request("/gym-owners/staff", { method:"POST", body:JSON.stringify(payload) });
