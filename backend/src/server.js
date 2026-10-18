@@ -27,6 +27,40 @@ async function ensureGymStaffTable() {
   `);
 }
 
+async function ensureGymCampaignsTable() {
+  await query(`
+    CREATE TABLE IF NOT EXISTS gym_campaigns (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      gym_id uuid NOT NULL REFERENCES gym_owners(id) ON DELETE CASCADE,
+      meta_campaign_id text,
+      meta_adset_id text,
+      meta_ad_id text,
+      campaign_name varchar(120) NOT NULL,
+      objective varchar(32) NOT NULL
+        CHECK (objective IN ('GET_MEMBERS', 'DIRECT_MESSAGES')),
+      daily_budget_inr double precision NOT NULL CHECK (daily_budget_inr > 0),
+      duration_days integer NOT NULL CHECK (duration_days IN (3, 7, 14)),
+      target_radius_km integer NOT NULL CHECK (target_radius_km BETWEEN 3 AND 15),
+      latitude double precision NOT NULL CHECK (latitude BETWEEN -90 AND 90),
+      longitude double precision NOT NULL CHECK (longitude BETWEEN -180 AND 180),
+      image_url varchar(2048) NOT NULL,
+      primary_text text NOT NULL,
+      status varchar(24) NOT NULL DEFAULT 'DRAFT'
+        CHECK (status IN ('DRAFT', 'PENDING_PAYMENT', 'ACTIVE', 'PAUSED', 'COMPLETED')),
+      payment_order_id text,
+      payment_id text,
+      payment_status varchar(20) NOT NULL DEFAULT 'CREATED'
+        CHECK (payment_status IN ('CREATED', 'PAID')),
+      total_amount_paise integer NOT NULL CHECK (total_amount_paise > 0),
+      created_at timestamptz NOT NULL DEFAULT now()
+    )
+  `);
+  await query(`
+    CREATE INDEX IF NOT EXISTS ix_gym_campaigns_gym_id_created_at
+    ON gym_campaigns(gym_id, created_at DESC)
+  `);
+}
+
 async function ensureSocialTables() {
   await query(`CREATE TABLE IF NOT EXISTS social_accounts (
     id uuid PRIMARY KEY,
@@ -270,6 +304,8 @@ app.use((err, req, res, _next) => {
 try {
   await ensureGymStaffTable();
   console.log("Gym staff table ready");
+  await ensureGymCampaignsTable();
+  console.log("Gym campaigns table ready");
   await ensureSocialTables();
   console.log("Social tables ready");
 } catch (err) {

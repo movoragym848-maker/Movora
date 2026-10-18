@@ -11,6 +11,7 @@ import { aiRoutes } from "./aiRoutes.js";
 import { attendanceRoutes } from "./attendanceRoutes.js";
 import { socialRoutes } from "./socialRoutes.js";
 import { reelRoutes } from "./reelRoutes.js";
+import { marketingRoutes } from "./marketingRoutes.js";
 
 export const routes = Router();
 
@@ -26,4 +27,5 @@ routes.use("/goal", requireAuth, goalRoutes);
 routes.use("/ai", requireAuth, aiRoutes);
 routes.use("/v1/attendance", attendanceRoutes);
 routes.use("/reels", reelRoutes);
+routes.use("/v1/marketing", marketingRoutes);
 routes.use("/social", socialRoutes);
