@@ -65,6 +65,13 @@ class CampaignExecuteRequest(BaseModel):
     razorpay_signature: str = Field(min_length=1, max_length=256)
 
 
+class CampaignPaymentOptionsResponse(BaseModel):
+    """Payment methods currently available to the authenticated gym owner."""
+
+    razorpay_available: bool
+    demo_payment_available: bool
+
+
 class CampaignStatusResponse(BaseModel):
     """Campaign record returned to its owning gym account."""
 

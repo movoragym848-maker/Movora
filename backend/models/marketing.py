@@ -27,7 +27,7 @@ class GymCampaign(Base):
         CheckConstraint("latitude BETWEEN -90 AND 90", name="ck_gym_campaign_latitude"),
         CheckConstraint("longitude BETWEEN -180 AND 180", name="ck_gym_campaign_longitude"),
         CheckConstraint("total_amount_paise > 0", name="ck_gym_campaign_amount"),
-        CheckConstraint("payment_status IN ('CREATED', 'PAID')", name="ck_gym_campaign_payment_status"),
+        CheckConstraint("payment_status IN ('CREATED', 'PAID', 'TEST')", name="ck_gym_campaign_payment_status"),
         Index("ix_gym_campaigns_gym_id_created_at", "gym_id", "created_at"),
     )
 

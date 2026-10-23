@@ -24,6 +24,13 @@ export interface Campaign {
   meta_ad_id: string | null;
 }
 
+export interface CampaignPaymentOptions {
+  razorpay_available: boolean;
+  demo_payment_available: boolean;
+}
+
+export type CampaignPaymentMode = "razorpay" | "demo";
+
 export interface CampaignCreatePayload {
   campaign_name: string;
   objective: CampaignObjective;

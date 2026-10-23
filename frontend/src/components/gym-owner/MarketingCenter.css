@@ -128,6 +128,23 @@
 .mk-integration-note > span:last-child { display: grid; gap: 3px; }
 .mk-integration-note strong { color: #53657e; font-size: 8px; }
 .mk-integration-note small { color: #8b98aa; font-size: 8px; line-height: 1.45; }
+.mk-test-payment-badge { width: fit-content; border: 1px solid #f1d89b; border-radius: 20px; padding: 4px 7px; background: #fff8e8; color: #8a5b00; font-size: 8px; font-weight: 800; letter-spacing: .25px; }
+.mk-payment-dialog-backdrop { position: fixed; z-index: 10000; inset: 0; display: grid; align-items: center; justify-items: center; overflow-y: auto; padding: 18px; background: rgba(15, 27, 45, .58); }
+.mk-payment-dialog { display: grid; width: min(100%, 410px); gap: 11px; border: 1px solid #e4eaf2; border-radius: 16px; padding: 22px; background: #fff; box-shadow: 0 18px 60px rgba(8, 25, 52, .25); }
+.mk-payment-dialog-icon { display: grid; width: 42px; height: 42px; place-items: center; border-radius: 12px; background: #edf4ff; color: #1265e8; }
+.mk-payment-dialog h2 { margin: 0; color: #1a2d49; font-size: 19px; }
+.mk-payment-dialog-summary { margin: -5px 0 2px; color: #718198; font-size: 11px; }
+.mk-payment-choice { display: grid; gap: 5px; border: 1px solid #dbe5f2; border-radius: 10px; padding: 12px; background: #fff; color: #233a5a; text-align: left; cursor: pointer; }
+.mk-payment-choice:not(:disabled):hover { border-color: #7ca9ee; background: #f7faff; }
+.mk-payment-choice strong { font-size: 12px; }
+.mk-payment-choice span { color: #718198; font-size: 10px; line-height: 1.45; }
+.mk-payment-choice:disabled { cursor: not-allowed; opacity: .58; }
+.mk-payment-choice-demo { border-color: #edd49c; background: #fffcf4; }
+.mk-payment-setup-note, .mk-payment-warning { margin: 0; border-radius: 8px; padding: 9px 10px; font-size: 10px; line-height: 1.5; }
+.mk-payment-setup-note { border: 1px solid #dce8fa; background: #f6f9ff; color: #536783; }
+.mk-payment-warning { border: 1px solid #f0d6a0; background: #fff9eb; color: #805700; font-weight: 650; }
+.mk-payment-cancel { min-height: 36px; border: 1px solid #e1e7ef; border-radius: 8px; background: #fff; color: #576980; cursor: pointer; font-size: 11px; font-weight: 700; }
+.mk-payment-cancel:disabled { cursor: wait; opacity: .6; }
 .mk-spin { animation: mk-spin 1s linear infinite; }
 @keyframes mk-spin { to { transform: rotate(360deg); } }
 

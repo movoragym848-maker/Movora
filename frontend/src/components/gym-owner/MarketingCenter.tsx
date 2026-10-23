@@ -4,6 +4,7 @@ import {
   ArrowUpRight,
   CheckCircle2,
   Clock3,
+  CreditCard,
   ImagePlus,
   LoaderCircle,
   MapPin,
@@ -14,7 +15,9 @@ import {
 } from "lucide-react";
 import {
   createGymCampaign,
+  executeGymCampaignDemo,
   executeGymCampaign,
+  getGymCampaignPaymentOptions,
   getGymCampaigns,
   uploadGymCampaignCreative,
 } from "../../services/api";
@@ -22,6 +25,8 @@ import type {
   Campaign,
   CampaignCreatePayload,
   CampaignObjective,
+  CampaignPaymentMode,
+  CampaignPaymentOptions,
   CampaignPaymentConfirmation,
   CampaignStatus,
   RazorpayCheckoutOptions,
@@ -87,6 +92,9 @@ function MarketingCenter({ gymOwner }: { gymOwner: { id?: string; gym_id?: strin
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState("");
   const [notice, setNotice] = useState("");
+  const [paymentOptions, setPaymentOptions] = useState<CampaignPaymentOptions | null>(null);
+  const [pendingCampaign, setPendingCampaign] = useState<CampaignCreatePayload | null>(null);
+  const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
 
   const refreshCampaigns = useCallback(async () => {
     if (!gymId) {
@@ -252,13 +260,47 @@ function MarketingCenter({ gymOwner }: { gymOwner: { id?: string; gym_id?: strin
         image_url: creativeUrl,
         primary_text: primaryText.trim(),
       };
-      const campaign = await createGymCampaign(payload) as Campaign;
-      setCampaigns(current => [campaign, ...current]);
-      await openCheckout(campaign);
+      const options = await getGymCampaignPaymentOptions() as CampaignPaymentOptions;
+      if (typeof options.razorpay_available !== "boolean" || typeof options.demo_payment_available !== "boolean") {
+        throw new Error("The campaign payment options response was invalid.");
+      }
+      setPendingCampaign(payload);
+      setPaymentOptions(options);
+      setPaymentDialogOpen(true);
     } catch (error) {
-      console.error("Unable to create gym campaign.", error);
-      setFormError(error instanceof Error ? error.message : "Campaign could not be created.");
+      console.error("Unable to load campaign payment options.", error);
+      setFormError(error instanceof Error ? error.message : "Campaign payment options could not be loaded.");
+    } finally {
       setSubmitting(false);
+    }
+  };
+
+  const choosePaymentMode = async (paymentMode: CampaignPaymentMode) => {
+    if (!pendingCampaign || !paymentOptions) return;
+    if (paymentMode === "razorpay" && !paymentOptions.razorpay_available) return;
+    if (paymentMode === "demo" && !paymentOptions.demo_payment_available) return;
+
+    setPaymentDialogOpen(false);
+    setSubmitting(true);
+    setFormError("");
+    let waitingForCheckout = false;
+    try {
+      const campaign = await createGymCampaign(pendingCampaign, paymentMode) as Campaign;
+      setCampaigns(current => [campaign, ...current]);
+      if (paymentMode === "demo") {
+        await executeGymCampaignDemo(campaign.id);
+        setNotice("Sandbox test completed. No real payment was made; verify the campaign in your Meta test ad account.");
+        await refreshCampaigns();
+      } else {
+        await openCheckout(campaign);
+        waitingForCheckout = true;
+      }
+    } catch (error) {
+      console.error(`Unable to start ${paymentMode} gym campaign.`, error);
+      setFormError(error instanceof Error ? error.message : "Campaign could not be created.");
+      await refreshCampaigns();
+    } finally {
+      if (!waitingForCheckout) setSubmitting(false);
     }
   };
 
@@ -360,7 +402,7 @@ function MarketingCenter({ gymOwner }: { gymOwner: { id?: string; gym_id?: strin
             <button type="submit" className="mk-launch-button" disabled={submitting || uploadLoading || !creativeUrl || !coordinates}>
               {submitting ? <><LoaderCircle size={17} className="mk-spin" /> Preparing secure checkout</> : <>Launch Campaign <span>• {formatMoney(totalAmount)}</span><ArrowUpRight size={17} /> </>}
             </button>
-            <p className="mk-payment-note"><CheckCircle2 size={13} /> Secure payment via Razorpay. Ads are activated after payment confirmation.</p>
+            <p className="mk-payment-note"><CheckCircle2 size={13} /> Choose Razorpay for a real payment or sandbox demo when enabled.</p>
           </form>
         </section>
 
@@ -377,6 +419,7 @@ function MarketingCenter({ gymOwner }: { gymOwner: { id?: string; gym_id?: strin
                   {campaigns.map(campaign => (
                     <article className="mk-campaign-item" key={campaign.id}>
                       <span className={`mk-campaign-status mk-status-${campaign.status.toLowerCase()}`}>{statusLabel(campaign.status)}</span>
+                      {campaign.payment_status === "TEST" && <span className="mk-test-payment-badge">SANDBOX TEST · NOT PAID</span>}
                       <strong>{campaign.campaign_name}</strong>
                       <span>{campaign.objective === "GET_MEMBERS" ? "Get New Members" : "Get Direct Messages"} · {campaign.target_radius_km} km · {campaign.duration_days} days</span>
                       <div><small>{formatMoney(campaign.daily_budget_inr)} / day</small><small>{new Date(campaign.created_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</small></div>
@@ -386,6 +429,53 @@ function MarketingCenter({ gymOwner }: { gymOwner: { id?: string; gym_id?: strin
           <div className="mk-integration-note"><span className="mk-integration-mark">M</span><span><strong>Managed by Movora</strong><small>Your ads run through Movora’s parent Meta account. No ad account needed.</small></span></div>
         </aside>
       </div>
+      {paymentDialogOpen && paymentOptions && (
+        <div className="mk-payment-dialog-backdrop" role="presentation">
+          <section className="mk-payment-dialog" role="dialog" aria-modal="true" aria-labelledby="mk-payment-dialog-title">
+            <span className="mk-payment-dialog-icon"><CreditCard size={21} /></span>
+            <h2 id="mk-payment-dialog-title">Choose how to continue</h2>
+            <p className="mk-payment-dialog-summary">{campaignName.trim()} · {formatMoney(totalAmount)}</p>
+            <button
+              type="button"
+              className="mk-payment-choice"
+              disabled={!paymentOptions.razorpay_available}
+              onClick={() => void choosePaymentMode("razorpay")}
+            >
+              <strong>Pay with Razorpay</strong>
+              <span>{paymentOptions.razorpay_available ? "Real payment · campaign activates after verified payment" : "Unavailable until Razorpay keys are configured"}</span>
+            </button>
+            <button
+              type="button"
+              className="mk-payment-choice mk-payment-choice-demo"
+              disabled={!paymentOptions.demo_payment_available}
+              onClick={() => void choosePaymentMode("demo")}
+            >
+              <strong>Run sandbox demo</strong>
+              <span>{paymentOptions.demo_payment_available
+                ? "No charge · activates only in the configured Meta sandbox ad account"
+                : "Unavailable · backend sandbox mode and matching test account are required"}</span>
+            </button>
+            {!paymentOptions.razorpay_available && (
+              <p className="mk-payment-setup-note" role="note">
+                To enable real checkout later, add RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET to the marketing service in Railway.
+              </p>
+            )}
+            {paymentOptions.demo_payment_available && (
+              <p className="mk-payment-warning" role="note">
+                Test mode is not a real payment and must only be enabled with a Meta test ad account. Do not use this mode with a live ad account.
+              </p>
+            )}
+            <button
+              type="button"
+              className="mk-payment-cancel"
+              disabled={submitting}
+              onClick={() => setPaymentDialogOpen(false)}
+            >
+              Cancel
+            </button>
+          </section>
+        </div>
+      )}
     </main>
   );
 }

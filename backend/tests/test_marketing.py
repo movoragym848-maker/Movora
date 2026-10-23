@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 from io import BytesIO
 import os
 import unittest
@@ -18,15 +19,20 @@ from starlette.datastructures import Headers
 from starlette.datastructures import UploadFile
 
 from main import app, debug_routes, root
+from models.marketing import GymCampaign
 from routers.marketing import (
     MAX_CREATIVE_BYTES,
+    _activate_meta_campaign,
     amount_to_charge_paise,
+    demo_payment_is_enabled,
+    execute_demo_campaign,
+    get_campaign_payment_options,
     list_gym_campaigns,
     require_gym_owner,
     upload_campaign_creative,
 )
 from schemas.marketing import CampaignCreateRequest, CampaignObjective
-from services.meta_marketing import MetaMarketingService
+from services.meta_marketing import MetaCampaignIds, MetaMarketingService
 
 
 class CampaignSchemaTests(unittest.TestCase):
@@ -89,8 +95,92 @@ class CampaignRouteTests(unittest.TestCase):
                 "/api/v1/marketing/campaigns",
                 "/api/v1/marketing/campaigns/creative",
                 "/api/v1/marketing/campaigns/{campaign_id}/execute",
+                "/api/v1/marketing/campaigns/{campaign_id}/demo-execute",
             }.issubset(post_routes)
         )
+        self.assertIn(
+            "/api/v1/marketing/campaigns/payment-options",
+            {route.path for route in app.routes},
+        )
+
+
+class CampaignDemoPaymentTests(unittest.TestCase):
+    """Ensure the no-charge path is explicitly limited to a configured Meta test account."""
+
+    def test_requires_opt_in_and_matching_sandbox_account(self) -> None:
+        environment = {
+            "MARKETING_DEMO_PAYMENT_ENABLED": "true",
+            "META_SANDBOX_AD_ACCOUNT_ID": "act_12345",
+            "META_AD_ACCOUNT_ID": "12345",
+            "META_APP_ID": "app",
+            "META_APP_SECRET": "secret",
+            "META_PAGE_ID": "page",
+            "META_ACCESS_TOKEN": "token",
+        }
+        with patch.dict(os.environ, environment, clear=True):
+            self.assertTrue(demo_payment_is_enabled())
+            os.environ["META_AD_ACCOUNT_ID"] = "98765"
+            self.assertFalse(demo_payment_is_enabled())
+            os.environ["META_AD_ACCOUNT_ID"] = "12345"
+            os.environ["MARKETING_DEMO_PAYMENT_ENABLED"] = "false"
+            self.assertFalse(demo_payment_is_enabled())
+
+    def test_disabled_demo_execution_is_rejected(self) -> None:
+        with patch.dict(os.environ, {}, clear=True):
+            with self.assertRaises(HTTPException) as raised:
+                execute_demo_campaign(UUID("9f4fd813-c4e4-4781-a06f-8b39c9d76d72"), "gym-id", MagicMock())
+
+        self.assertEqual(raised.exception.status_code, 403)
+
+    def test_demo_mode_requires_the_configured_meta_account_to_match_test_account(self) -> None:
+        environment = {
+            "MARKETING_DEMO_PAYMENT_ENABLED": "true",
+            "META_SANDBOX_AD_ACCOUNT_ID": "test-account",
+            "META_AD_ACCOUNT_ID": "live-account",
+            "META_APP_ID": "app",
+            "META_APP_SECRET": "secret",
+            "META_PAGE_ID": "page",
+            "META_ACCESS_TOKEN": "token",
+        }
+        with patch.dict(os.environ, environment, clear=True):
+            with self.assertRaises(HTTPException) as raised:
+                execute_demo_campaign(UUID("9f4fd813-c4e4-4781-a06f-8b39c9d76d72"), "gym-id", MagicMock())
+
+        self.assertEqual(raised.exception.status_code, 403)
+
+    def test_payment_options_do_not_expose_credentials(self) -> None:
+        with patch.dict(os.environ, {}, clear=True):
+            options = get_campaign_payment_options("gym-id")
+
+        self.assertEqual(options.model_dump(), {"razorpay_available": False, "demo_payment_available": False})
+
+    def test_demo_activation_is_recorded_as_test_not_paid(self) -> None:
+        campaign = GymCampaign(
+            id="9f4fd813-c4e4-4781-a06f-8b39c9d76d72",
+            gym_id="ee9c9e7a-f915-4a64-8de4-7b4fb5319d08",
+            campaign_name="Sandbox test",
+            objective="GET_MEMBERS",
+            daily_budget_inr=500,
+            duration_days=7,
+            target_radius_km=5,
+            latitude=19.076,
+            longitude=72.8777,
+            image_url="https://assets.example.test/campaign.jpg",
+            primary_text="Test campaign",
+            status="DRAFT",
+            payment_order_id=None,
+            payment_status="CREATED",
+            total_amount_paise=413000,
+            created_at=datetime.now(timezone.utc),
+        )
+        meta = MagicMock()
+        meta.create_campaign.return_value = MetaCampaignIds("meta-campaign", "meta-adset", "meta-ad")
+        with patch("routers.marketing.MetaMarketingService", return_value=meta):
+            response = _activate_meta_campaign(campaign, MagicMock(), payment_status="TEST")
+
+        self.assertEqual(response.payment_status, "TEST")
+        self.assertEqual(campaign.payment_status, "TEST")
+        self.assertEqual(response.status, "ACTIVE")
 
 
 class CampaignCreativeUploadTests(unittest.TestCase):

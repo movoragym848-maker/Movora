@@ -6,7 +6,7 @@ import asyncio
 import logging
 import os
 from decimal import Decimal, ROUND_HALF_UP
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID, uuid4
 
 import boto3
@@ -15,7 +15,7 @@ from boto3.exceptions import S3UploadFailedError
 from boto3.s3.transfer import TransferConfig
 from botocore.exceptions import BotoCoreError, ClientError, NoCredentialsError
 from facebook_business.exceptions import FacebookRequestError
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select, text
 from sqlalchemy.exc import SQLAlchemyError
@@ -27,6 +27,7 @@ from schemas.marketing import (
     CampaignAnalyticsResponse,
     CampaignCreateRequest,
     CampaignExecuteRequest,
+    CampaignPaymentOptionsResponse,
     CampaignStatus,
     CampaignStatusResponse,
 )
@@ -84,6 +85,39 @@ def amount_to_charge_paise(daily_budget_inr: float, duration_days: int) -> int:
     """Compute campaign budget plus 18% GST in integer paise."""
     amount_rupees = Decimal(str(daily_budget_inr)) * duration_days * Decimal("1.18")
     return int((amount_rupees * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+
+
+def _normalize_ad_account_id(value: str) -> str:
+    return value.strip().removeprefix("act_")
+
+
+def demo_payment_is_enabled() -> bool:
+    """Require explicit opt-in and an exact match to the configured Meta test account."""
+    if os.getenv("MARKETING_DEMO_PAYMENT_ENABLED", "").strip().lower() != "true":
+        return False
+    sandbox_account_id = os.getenv("META_SANDBOX_AD_ACCOUNT_ID", "").strip()
+    configured_account_id = os.getenv("META_AD_ACCOUNT_ID", "").strip()
+    if not sandbox_account_id or not configured_account_id:
+        return False
+    if _normalize_ad_account_id(sandbox_account_id) != _normalize_ad_account_id(configured_account_id):
+        return False
+    try:
+        MetaMarketingService().validate_configuration()
+    except MetaConfigurationError:
+        return False
+    return True
+
+
+@router.get("/campaigns/payment-options", response_model=CampaignPaymentOptionsResponse)
+def get_campaign_payment_options(
+    _gym_id: str = Depends(require_gym_owner),
+) -> CampaignPaymentOptionsResponse:
+    """Report available payment modes without exposing payment or Meta credentials."""
+    payments = MarketingPaymentService()
+    return CampaignPaymentOptionsResponse(
+        razorpay_available=bool(payments.key_id and payments.key_secret),
+        demo_payment_available=demo_payment_is_enabled(),
+    )
 
 
 @router.post("/campaigns/creative", status_code=status.HTTP_201_CREATED)
@@ -149,25 +183,33 @@ async def upload_campaign_creative(
 @router.post("/campaigns", response_model=CampaignStatusResponse, status_code=status.HTTP_201_CREATED)
 def create_campaign(
     payload: CampaignCreateRequest,
+    payment_mode: Literal["razorpay", "demo"] = Query(default="razorpay"),
     gym_id: str = Depends(require_gym_owner),
     session: Session = Depends(get_session),
 ) -> CampaignStatusResponse:
-    """Save a draft campaign and initialize its verified Razorpay checkout order."""
+    """Save a draft and initialize either Razorpay checkout or gated sandbox testing."""
     campaign_id = str(uuid4())
     total_amount_paise = amount_to_charge_paise(payload.daily_budget_inr, payload.duration_days)
+    if payment_mode == "demo" and not demo_payment_is_enabled():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Demo payment is disabled or the configured Meta account does not match META_SANDBOX_AD_ACCOUNT_ID.",
+        )
     try:
         MetaMarketingService().validate_configuration()
     except MetaConfigurationError as error:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)) from error
 
     payments = MarketingPaymentService()
-    try:
-        order = payments.create_order(total_amount_paise, campaign_id, gym_id)
-    except PaymentConfigurationError as error:
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)) from error
-    except PaymentProviderError as error:
-        logger.exception("Razorpay campaign checkout initialization failed")
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(error)) from error
+    order: dict[str, Any] | None = None
+    if payment_mode == "razorpay":
+        try:
+            order = payments.create_order(total_amount_paise, campaign_id, gym_id)
+        except PaymentConfigurationError as error:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)) from error
+        except PaymentProviderError as error:
+            logger.exception("Razorpay campaign checkout initialization failed")
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(error)) from error
 
     campaign = GymCampaign(
         id=campaign_id,
@@ -182,7 +224,7 @@ def create_campaign(
         image_url=str(payload.image_url),
         primary_text=payload.primary_text,
         status=CampaignStatus.DRAFT.value,
-        payment_order_id=order["order_id"],
+        payment_order_id=order["order_id"] if order else None,
         payment_status="CREATED",
         total_amount_paise=total_amount_paise,
     )
@@ -196,7 +238,78 @@ def create_campaign(
         raise
 
     response = CampaignStatusResponse.model_validate(campaign)
-    return response.model_copy(update={"payment_key_id": order["key_id"]})
+    return response.model_copy(update={"payment_key_id": order["key_id"] if order else None})
+
+
+def _activate_meta_campaign(
+    campaign: GymCampaign,
+    session: Session,
+    payment_status: str | None = None,
+) -> CampaignStatusResponse:
+    """Create and activate the stored campaign in Meta after payment has been accepted."""
+    meta = MetaMarketingService()
+    try:
+        meta.validate_configuration()
+    except MetaConfigurationError as error:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)) from error
+
+    request_payload = CampaignCreateRequest(
+        campaign_name=campaign.campaign_name,
+        objective=campaign.objective,
+        daily_budget_inr=campaign.daily_budget_inr,
+        duration_days=campaign.duration_days,
+        target_radius_km=campaign.target_radius_km,
+        latitude=campaign.latitude,
+        longitude=campaign.longitude,
+        image_url=campaign.image_url,
+        primary_text=campaign.primary_text,
+    )
+    try:
+        if campaign.meta_campaign_id and campaign.meta_adset_id and campaign.meta_ad_id:
+            ids = MetaCampaignIds(campaign.meta_campaign_id, campaign.meta_adset_id, campaign.meta_ad_id)
+        else:
+            ids = meta.create_campaign(request_payload)
+            campaign.meta_campaign_id = ids.campaign_id
+            campaign.meta_adset_id = ids.adset_id
+            campaign.meta_ad_id = ids.ad_id
+            session.commit()
+        meta.activate_campaign(ids)
+    except MetaConfigurationError as error:
+        session.rollback()
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)) from error
+    except FacebookRequestError as error:
+        session.rollback()
+        logger.exception("Meta rejected a gym-owner marketing campaign")
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Meta could not publish this campaign.") from error
+
+    campaign.status = CampaignStatus.ACTIVE.value
+    if payment_status is not None:
+        campaign.payment_status = payment_status
+    session.commit()
+    session.refresh(campaign)
+    return CampaignStatusResponse.model_validate(campaign)
+
+
+@router.post("/campaigns/{campaign_id}/demo-execute", response_model=CampaignStatusResponse)
+def execute_demo_campaign(
+    campaign_id: UUID,
+    gym_id: str = Depends(require_gym_owner),
+    session: Session = Depends(get_session),
+) -> CampaignStatusResponse:
+    """Activate a campaign in the explicitly configured Meta sandbox without claiming real payment."""
+    if not demo_payment_is_enabled():
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Sandbox demo payment is not enabled.")
+    campaign = session.scalar(
+        select(GymCampaign).where(GymCampaign.id == str(campaign_id), GymCampaign.gym_id == gym_id)
+    )
+    if campaign is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Campaign not found.")
+    if campaign.status == CampaignStatus.ACTIVE.value and campaign.payment_status == "TEST":
+        return CampaignStatusResponse.model_validate(campaign)
+    if campaign.payment_order_id is not None or campaign.payment_status != "CREATED":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This campaign is not eligible for sandbox demo activation.")
+
+    return _activate_meta_campaign(campaign, session, payment_status="TEST")
 
 
 @router.post("/campaigns/{campaign_id}/execute", response_model=CampaignStatusResponse)
@@ -243,40 +356,7 @@ def execute_campaign(
     campaign.payment_status = "PAID"
     session.commit()
     session.refresh(campaign)
-
-    request_payload = CampaignCreateRequest(
-        campaign_name=campaign.campaign_name,
-        objective=campaign.objective,
-        daily_budget_inr=campaign.daily_budget_inr,
-        duration_days=campaign.duration_days,
-        target_radius_km=campaign.target_radius_km,
-        latitude=campaign.latitude,
-        longitude=campaign.longitude,
-        image_url=campaign.image_url,
-        primary_text=campaign.primary_text,
-    )
-    try:
-        if campaign.meta_campaign_id and campaign.meta_adset_id and campaign.meta_ad_id:
-            ids = MetaCampaignIds(campaign.meta_campaign_id, campaign.meta_adset_id, campaign.meta_ad_id)
-        else:
-            ids = meta.create_campaign(request_payload)
-            campaign.meta_campaign_id = ids.campaign_id
-            campaign.meta_adset_id = ids.adset_id
-            campaign.meta_ad_id = ids.ad_id
-            session.commit()
-        meta.activate_campaign(ids)
-    except MetaConfigurationError as error:
-        session.rollback()
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)) from error
-    except FacebookRequestError as error:
-        session.rollback()
-        logger.exception("Meta rejected a gym-owner marketing campaign")
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Meta could not publish this campaign.") from error
-
-    campaign.status = CampaignStatus.ACTIVE.value
-    session.commit()
-    session.refresh(campaign)
-    return CampaignStatusResponse.model_validate(campaign)
+    return _activate_meta_campaign(campaign, session)
 
 
 @router.get("/campaigns/gym/{gym_id}", response_model=list[CampaignStatusResponse])

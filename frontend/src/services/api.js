@@ -19,6 +19,22 @@ function delay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+function getSessionContext(sessionType = "current") {
+  const storageKey = sessionType === "gym_owner"
+    ? "rs_gym_owner_session"
+    : sessionType === "user"
+      ? "rs_session"
+      : localStorage.getItem("rs_session")
+        ? "rs_session"
+        : "rs_gym_owner_session";
+  const storedSession = localStorage.getItem(storageKey);
+  return {
+    session: storedSession ? JSON.parse(storedSession) : null,
+    storageKey,
+    isGymOwner: storageKey === "rs_gym_owner_session",
+  };
+}
+
 // Helper to show API errors
 const showAPIError = (message, retry = null) => {
   if (window.handleAPIError) {
@@ -28,11 +44,10 @@ const showAPIError = (message, retry = null) => {
   }
 };
 
-async function refreshAccessToken() {
-  const session = JSON.parse(localStorage.getItem("rs_session") || localStorage.getItem("rs_gym_owner_session") || "null");
+async function refreshAccessToken(sessionType = "current") {
+  const { session, storageKey, isGymOwner } = getSessionContext(sessionType);
   if (!session?.refreshToken) throw new Error("No refresh token available");
   
-  const isGymOwner = !!localStorage.getItem("rs_gym_owner_session");
   const endpoint = isGymOwner ? "/gym-owners/refresh" : "/auth/refresh";
   
   try {
@@ -47,7 +62,6 @@ async function refreshAccessToken() {
     
     // Update session with new access token
     session.accessToken = data.accessToken;
-    const storageKey = isGymOwner ? "rs_gym_owner_session" : "rs_session";
     localStorage.setItem(storageKey, JSON.stringify(session));
     
     return data.accessToken;
@@ -59,8 +73,8 @@ async function refreshAccessToken() {
   }
 }
 
-export async function request(path, options = {}, retryCount = 0) {
-  const session = JSON.parse(localStorage.getItem("rs_session") || localStorage.getItem("rs_gym_owner_session") || "null");
+export async function request(path, options = {}, retryCount = 0, sessionType = "current") {
+  const { session, storageKey } = getSessionContext(sessionType);
   const isFormData = typeof FormData !== "undefined" && options.body instanceof FormData;
   const headers = { ...(isFormData ? {} : { "Content-Type": "application/json" }), ...(options.headers || {}) };
   if (session?.accessToken) headers.Authorization = `Bearer ${session.accessToken}`;
@@ -79,12 +93,11 @@ export async function request(path, options = {}, retryCount = 0) {
     // Handle token expiration with refresh
     if (res.status === 401 && retryCount === 0 && session?.refreshToken) {
       try {
-        await refreshAccessToken();
-        return request(path, options, 1); // Retry with new token
+        await refreshAccessToken(sessionType);
+        return request(path, options, 1, sessionType); // Retry with new token
       } catch (err) {
         // Refresh failed, clear session
-        localStorage.removeItem("rs_session");
-        localStorage.removeItem("rs_gym_owner_session");
+        localStorage.removeItem(storageKey);
         throw new Error("Session expired. Please log in again.");
       }
     }
@@ -93,8 +106,11 @@ export async function request(path, options = {}, retryCount = 0) {
       const marketingEndpointNotFound = res.status === 404
         && fullUrl.includes("/api/v1/marketing/")
         && (!data.detail || data.detail === "Not Found");
+      const marketingAuthenticationFailed = res.status === 401 && fullUrl.includes("/api/v1/marketing/");
       const message = marketingEndpointNotFound
         ? `Marketing API endpoint not found at ${fullUrl}. Check that VITE_MARKETING_API_URL points to the deployed FastAPI marketing service.`
+        : marketingAuthenticationFailed
+          ? "The marketing service rejected your gym-owner access token. Sign in again; if the problem continues, confirm that its JWT_ACCESS_SECRET matches the main API and VITE_MARKETING_API_URL points to the deployed FastAPI marketing service."
         : data.message || data.detail || `Request failed (${res.status})`;
       const error = new Error(message);
       error.data = data;
@@ -110,7 +126,7 @@ export async function request(path, options = {}, retryCount = 0) {
 
     if (shouldRetry) {
       await delay(500);
-      return request(path, options, retryCount + 1);
+      return request(path, options, retryCount + 1, sessionType);
     }
 
     if (normalizedMessage.includes("no internet") || !navigator.onLine) {
@@ -156,20 +172,24 @@ export const getGymMembers = () => request("/gym-owners/members");
 const MARKETING_API_URL = (import.meta.env?.VITE_MARKETING_API_URL || "").trim().replace(/\/+$/, "");
 const marketingApiOrigin = (MARKETING_API_URL || API_URL).replace(/\/api$/i, "");
 const marketingEndpoint = path => `${marketingApiOrigin}/api/v1/marketing${path}`;
-export const getGymCampaigns = gymId => request(marketingEndpoint(`/campaigns/gym/${encodeURIComponent(gymId)}`));
-export const createGymCampaign = payload => request(marketingEndpoint("/campaigns"), {
+export const getGymCampaignPaymentOptions = () => request(marketingEndpoint("/campaigns/payment-options"), {}, 0, "gym_owner");
+export const getGymCampaigns = gymId => request(marketingEndpoint(`/campaigns/gym/${encodeURIComponent(gymId)}`), {}, 0, "gym_owner");
+export const createGymCampaign = (payload, paymentMode = "razorpay") => request(`${marketingEndpoint("/campaigns")}?payment_mode=${encodeURIComponent(paymentMode)}`, {
   method:"POST",
   body:JSON.stringify(payload),
-});
+}, 0, "gym_owner");
+export const executeGymCampaignDemo = campaignId => request(marketingEndpoint(`/campaigns/${encodeURIComponent(campaignId)}/demo-execute`), {
+  method:"POST",
+}, 0, "gym_owner");
 export const uploadGymCampaignCreative = file => {
   const body = new FormData();
   body.append("file", file);
-  return request(marketingEndpoint("/campaigns/creative"), { method:"POST", body });
+  return request(marketingEndpoint("/campaigns/creative"), { method:"POST", body }, 0, "gym_owner");
 };
 export const executeGymCampaign = (campaignId, payment) => request(marketingEndpoint(`/campaigns/${encodeURIComponent(campaignId)}/execute`), {
   method:"POST",
   body:JSON.stringify(payment),
-});
+}, 0, "gym_owner");
 export const getGymAttendance = date => request(`/gym-owners/attendance?date=${encodeURIComponent(date)}`);
 export const getGymStaff = () => request("/gym-owners/staff");
 export const addGymStaff = payload => request("/gym-owners/staff", { method:"POST", body:JSON.stringify(payload) });
