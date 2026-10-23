@@ -147,7 +147,12 @@ def root() -> dict[str, str]:
 
 @app.get("/debug/routes")
 def debug_routes() -> list[dict[str, str]]:
-    return [{"path": route.path, "name": route.name} for route in app.routes]
+    return [
+        {"path": path, "name": operation["operationId"]}
+        for path, path_item in app.openapi()["paths"].items()
+        for operation in path_item.values()
+        if isinstance(operation, dict) and "operationId" in operation
+    ]
 
 
 @app.get("/api/reels", response_model=FeedResponse)
