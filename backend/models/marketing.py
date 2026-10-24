@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import uuid4
 
-from sqlalchemy import CheckConstraint, DateTime, Float, ForeignKey, Index, Integer, String, Uuid, func
+from sqlalchemy import CheckConstraint, DateTime, Float, Index, Integer, String, Uuid, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from db.database import Base
@@ -32,9 +32,7 @@ class GymCampaign(Base):
     )
 
     id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=lambda: str(uuid4()))
-    gym_id: Mapped[str] = mapped_column(
-        Uuid(as_uuid=False), ForeignKey("gym_owners.id", ondelete="CASCADE"), nullable=False
-    )
+    gym_id: Mapped[str] = mapped_column(Uuid(as_uuid=False), nullable=False)
     meta_campaign_id: Mapped[str | None] = mapped_column(String, nullable=True)
     meta_adset_id: Mapped[str | None] = mapped_column(String, nullable=True)
     meta_ad_id: Mapped[str | None] = mapped_column(String, nullable=True)

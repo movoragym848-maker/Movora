@@ -15,6 +15,8 @@ import jwt
 from fastapi import HTTPException
 from fastapi.security import HTTPAuthorizationCredentials
 from pydantic import ValidationError
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
 from starlette.datastructures import Headers
 from starlette.datastructures import UploadFile
 
@@ -216,6 +218,32 @@ class CampaignDemoPaymentTests(unittest.TestCase):
         self.assertEqual(response.payment_status, "TEST")
         self.assertEqual(campaign.payment_status, "TEST")
         self.assertEqual(response.status, "ACTIVE")
+
+    def test_campaign_orm_flush_does_not_require_express_owned_gym_table(self) -> None:
+        engine = create_engine("sqlite:///:memory:")
+        GymCampaign.__table__.create(engine)
+        campaign = GymCampaign(
+            id="9f4fd813-c4e4-4781-a06f-8b39c9d76d72",
+            gym_id="ee9c9e7a-f915-4a64-8de4-7b4fb5319d08",
+            campaign_name="Sandbox test",
+            objective="GET_MEMBERS",
+            daily_budget_inr=500,
+            duration_days=7,
+            target_radius_km=5,
+            latitude=19.076,
+            longitude=72.8777,
+            image_url="https://assets.example.test/campaign.jpg",
+            primary_text="Test campaign",
+            status="DRAFT",
+            payment_status="CREATED",
+            total_amount_paise=413000,
+        )
+
+        with Session(engine) as session:
+            session.add(campaign)
+            session.flush()
+
+        engine.dispose()
 
 
 class CampaignCreativeUploadTests(unittest.TestCase):
