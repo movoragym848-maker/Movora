@@ -67,6 +67,7 @@ function statusLabel(status: CampaignStatus): string {
     ACTIVE: "Active",
     PAUSED: "Paused",
     COMPLETED: "Completed",
+    FAILED: "Launch failed",
   };
   return labels[status];
 }
@@ -426,6 +427,12 @@ function MarketingCenter({ gymOwner }: { gymOwner: { id?: string; gym_id?: strin
                       <span className={`mk-campaign-status mk-status-${campaign.status.toLowerCase()}`}>{statusLabel(campaign.status)}</span>
                       {campaign.payment_status === "TEST" && <span className="mk-test-payment-badge">SANDBOX TEST · NOT PAID</span>}
                       <strong>{campaign.campaign_name}</strong>
+                      {campaign.failure_reason && <span className="mk-campaign-failure">{campaign.failure_reason}</span>}
+                      {campaign.status === "FAILED" && campaign.payment_status === "PAID" && (
+                        <span className="mk-campaign-failure">
+                          Razorpay payment was verified, but Meta did not launch the campaign. Contact Movora support before attempting another payment.
+                        </span>
+                      )}
                       <span>{campaign.objective === "GET_MEMBERS" ? "Get New Members" : "Get Direct Messages"} · {campaign.target_radius_km} km · {campaign.duration_days} days</span>
                       <div><small>{formatMoney(campaign.daily_budget_inr)} / day</small><small>{new Date(campaign.created_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</small></div>
                     </article>

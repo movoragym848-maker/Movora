@@ -1,5 +1,5 @@
 export type CampaignObjective = "GET_MEMBERS" | "DIRECT_MESSAGES";
-export type CampaignStatus = "DRAFT" | "PENDING_PAYMENT" | "ACTIVE" | "PAUSED" | "COMPLETED";
+export type CampaignStatus = "DRAFT" | "PENDING_PAYMENT" | "ACTIVE" | "PAUSED" | "COMPLETED" | "FAILED";
 
 export interface Campaign {
   id: string;
@@ -14,6 +14,7 @@ export interface Campaign {
   image_url: string;
   primary_text: string;
   status: CampaignStatus;
+  failure_reason: string | null;
   payment_order_id: string | null;
   payment_key_id?: string | null;
   payment_status: string;

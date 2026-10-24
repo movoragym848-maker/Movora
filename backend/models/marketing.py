@@ -18,7 +18,7 @@ class GymCampaign(Base):
     __table_args__ = (
         CheckConstraint("objective IN ('GET_MEMBERS', 'DIRECT_MESSAGES')", name="ck_gym_campaign_objective"),
         CheckConstraint(
-            "status IN ('DRAFT', 'PENDING_PAYMENT', 'ACTIVE', 'PAUSED', 'COMPLETED')",
+            "status IN ('DRAFT', 'PENDING_PAYMENT', 'ACTIVE', 'PAUSED', 'COMPLETED', 'FAILED')",
             name="ck_gym_campaign_status",
         ),
         CheckConstraint("daily_budget_inr > 0", name="ck_gym_campaign_budget"),
@@ -46,6 +46,7 @@ class GymCampaign(Base):
     image_url: Mapped[str] = mapped_column(String(2048), nullable=False)
     primary_text: Mapped[str] = mapped_column(String(2000), nullable=False)
     status: Mapped[str] = mapped_column(String(24), nullable=False, default="DRAFT")
+    failure_reason: Mapped[str | None] = mapped_column(String(2000), nullable=True)
     payment_order_id: Mapped[str | None] = mapped_column(String, nullable=True)
     payment_id: Mapped[str | None] = mapped_column(String, nullable=True)
     payment_status: Mapped[str] = mapped_column(String(20), nullable=False, default="CREATED")

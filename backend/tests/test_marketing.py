@@ -36,6 +36,7 @@ from routers.marketing import (
     upload_campaign_creative,
     _demo_payment_reasons,
     _meta_error_detail,
+    _mark_campaign_failed,
 )
 from schemas.marketing import CampaignCreateRequest, CampaignObjective
 from services.meta_marketing import MetaCampaignIds, MetaMarketingService
@@ -222,6 +223,45 @@ class CampaignDemoPaymentTests(unittest.TestCase):
         self.assertEqual(campaign.payment_status, "TEST")
         self.assertEqual(response.status, "ACTIVE")
 
+    def test_meta_rejection_marks_campaign_failed_before_returning_error(self) -> None:
+        campaign = GymCampaign(
+            id="9f4fd813-c4e4-4781-a06f-8b39c9d76d72",
+            gym_id="ee9c9e7a-f915-4a64-8de4-7b4fb5319d08",
+            campaign_name="Rejected campaign",
+            objective="GET_MEMBERS",
+            daily_budget_inr=500,
+            duration_days=7,
+            target_radius_km=5,
+            latitude=19.076,
+            longitude=72.8777,
+            image_url="https://assets.example.test/campaign.jpg",
+            primary_text="Test campaign",
+            status="DRAFT",
+            payment_status="CREATED",
+            total_amount_paise=413000,
+        )
+        error = FacebookRequestError(
+            "Request failed",
+            {"method": "POST", "path": "/act_test/campaigns"},
+            400,
+            {},
+            json.dumps({"error": {"message": "Invalid budget", "code": 100}}),
+        )
+        meta = MagicMock()
+        meta.create_campaign.side_effect = error
+        session = MagicMock()
+
+        with patch("routers.marketing.MetaMarketingService", return_value=meta):
+            with self.assertRaises(HTTPException) as raised:
+                _activate_meta_campaign(campaign, session, payment_status="TEST")
+
+        self.assertEqual(raised.exception.status_code, 502)
+        self.assertEqual(campaign.status, "FAILED")
+        self.assertIn("Invalid budget", campaign.failure_reason)
+        self.assertEqual(campaign.payment_status, "CREATED")
+        session.rollback.assert_called_once()
+        session.commit.assert_called_once()
+
     def test_campaign_orm_flush_does_not_require_express_owned_gym_table(self) -> None:
         engine = create_engine("sqlite:///:memory:")
         GymCampaign.__table__.create(engine)
@@ -246,6 +286,38 @@ class CampaignDemoPaymentTests(unittest.TestCase):
             session.add(campaign)
             session.flush()
 
+        engine.dispose()
+
+    def test_failed_launch_is_saved_as_failed_with_meta_reason(self) -> None:
+        engine = create_engine("sqlite:///:memory:")
+        GymCampaign.__table__.create(engine)
+        campaign = GymCampaign(
+            id="9f4fd813-c4e4-4781-a06f-8b39c9d76d72",
+            gym_id="ee9c9e7a-f915-4a64-8de4-7b4fb5319d08",
+            campaign_name="Failed sandbox test",
+            objective="GET_MEMBERS",
+            daily_budget_inr=500,
+            duration_days=7,
+            target_radius_km=5,
+            latitude=19.076,
+            longitude=72.8777,
+            image_url="https://assets.example.test/campaign.jpg",
+            primary_text="Test campaign",
+            status="DRAFT",
+            payment_status="CREATED",
+            total_amount_paise=413000,
+        )
+        reason = "Meta requires an explicit ad-set budget sharing setting."
+
+        with Session(engine) as session:
+            session.add(campaign)
+            session.commit()
+            _mark_campaign_failed(campaign, session, reason)
+            saved = session.get(GymCampaign, campaign.id)
+
+        self.assertEqual(saved.status, "FAILED")
+        self.assertEqual(saved.failure_reason, reason)
+        self.assertIsNone(saved.payment_order_id)
         engine.dispose()
 
 
@@ -364,6 +436,9 @@ class MetaVideoCreativeTests(unittest.TestCase):
                 patch("services.meta_marketing.AdAccount", return_value=account):
             MetaMarketingService().create_campaign(payload)
 
+        self.assertFalse(
+            account.create_campaign.call_args.kwargs["params"]["is_adset_budget_sharing_enabled"]
+        )
         account.create_ad_video.assert_called_once_with(
             params={"file_url": "https://assets.example.test/campaign.mp4"}
         )

@@ -154,6 +154,15 @@ def _meta_error_detail(error: FacebookRequestError, operation: str) -> str:
     )
 
 
+def _mark_campaign_failed(campaign: GymCampaign, session: Session, reason: str) -> None:
+    """Persist a failed launch so campaign history cannot label it payment-pending or active."""
+    campaign.status = CampaignStatus.FAILED.value
+    campaign.failure_reason = reason[:2000]
+    session.add(campaign)
+    session.commit()
+    session.refresh(campaign)
+
+
 @router.get("/campaigns/payment-options", response_model=CampaignPaymentOptionsResponse)
 def get_campaign_payment_options(
     _gym_id: str = Depends(require_gym_owner),
@@ -336,6 +345,8 @@ def _activate_meta_campaign(
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)) from error
     except FacebookRequestError as error:
         session.rollback()
+        detail = _meta_error_detail(error, "campaign")
+        _mark_campaign_failed(campaign, session, detail)
         logger.error(
             "Meta rejected a gym campaign request (HTTP %s, code=%s, subcode=%s)",
             error.http_status(),
@@ -344,7 +355,7 @@ def _activate_meta_campaign(
         )
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=_meta_error_detail(error, "campaign"),
+            detail=detail,
         ) from error
 
     campaign.status = CampaignStatus.ACTIVE.value

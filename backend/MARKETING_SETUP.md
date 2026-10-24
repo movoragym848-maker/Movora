@@ -33,6 +33,8 @@ The campaign screen queries `/api/v1/marketing/campaigns/payment-options`. It re
 
 When Meta rejects campaign creation or activation, the API returns Meta's user-facing reason and error code/subcode in the response, with access tokens and app secrets redacted. Railway runtime logs record the HTTP status and Meta error codes without logging the SDK request parameters.
 
+Meta campaign creation explicitly sets `is_adset_budget_sharing_enabled=false` because Movora configures the budget on each ad set. Failed Meta launches are stored with `FAILED` status and the Meta reason, not shown as payment-pending or active. Migration `026_mark_failed_campaigns` also reclassifies older unpaid drafts that never completed a launch.
+
 Campaign creative uploads accept JPEG, PNG, WebP, MP4, and MOV files up to 500 MiB. Configure the frontend host, reverse proxy, and FastAPI deployment to allow request bodies slightly larger than 500 MiB to account for multipart form overhead. Files are streamed to R2 with multipart upload rather than buffered fully in application memory.
 
 For a local FastAPI service, run `uvicorn main:app --reload` from `backend/` after setting its environment. Apply migrations with `alembic upgrade head`.

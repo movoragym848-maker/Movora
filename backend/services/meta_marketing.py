@@ -56,6 +56,7 @@ class MetaMarketingService:
                 "objective": "OUTCOME_TRAFFIC",
                 "status": MetaCampaign.Status.paused,
                 "special_ad_categories": [],
+                "is_adset_budget_sharing_enabled": False,
             }
         )
         campaign_id = str(campaign["id"])

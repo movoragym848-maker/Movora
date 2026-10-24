@@ -24,6 +24,7 @@ class CampaignStatus(str, Enum):
     ACTIVE = "ACTIVE"
     PAUSED = "PAUSED"
     COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
 
 
 class CampaignCreateRequest(BaseModel):
@@ -94,6 +95,7 @@ class CampaignStatusResponse(BaseModel):
     image_url: str
     primary_text: str
     status: CampaignStatus
+    failure_reason: str | None = None
     payment_order_id: str | None
     payment_key_id: str | None = None
     payment_status: str
