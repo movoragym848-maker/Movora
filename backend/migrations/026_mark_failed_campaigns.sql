@@ -1,6 +1,7 @@
 ALTER TABLE gym_campaigns ADD COLUMN IF NOT EXISTS failure_reason varchar(2000);
 
 ALTER TABLE gym_campaigns DROP CONSTRAINT IF EXISTS ck_gym_campaign_status;
+ALTER TABLE gym_campaigns DROP CONSTRAINT IF EXISTS gym_campaigns_status_check;
 ALTER TABLE gym_campaigns
   ADD CONSTRAINT ck_gym_campaign_status
   CHECK (status IN ('DRAFT', 'PENDING_PAYMENT', 'ACTIVE', 'PAUSED', 'COMPLETED', 'FAILED'));

@@ -12,6 +12,7 @@ def upgrade() -> None:
     """Add failed launch history and correctly classify old unpaid demo attempts."""
     op.execute("ALTER TABLE gym_campaigns ADD COLUMN IF NOT EXISTS failure_reason varchar(2000)")
     op.execute("ALTER TABLE gym_campaigns DROP CONSTRAINT IF EXISTS ck_gym_campaign_status")
+    op.execute("ALTER TABLE gym_campaigns DROP CONSTRAINT IF EXISTS gym_campaigns_status_check")
     op.execute(
         "ALTER TABLE gym_campaigns ADD CONSTRAINT ck_gym_campaign_status "
         "CHECK (status IN ('DRAFT', 'PENDING_PAYMENT', 'ACTIVE', 'PAUSED', 'COMPLETED', 'FAILED'))"
@@ -39,6 +40,7 @@ def downgrade() -> None:
         """
     )
     op.execute("ALTER TABLE gym_campaigns DROP CONSTRAINT IF EXISTS ck_gym_campaign_status")
+    op.execute("ALTER TABLE gym_campaigns DROP CONSTRAINT IF EXISTS gym_campaigns_status_check")
     op.execute(
         "ALTER TABLE gym_campaigns ADD CONSTRAINT ck_gym_campaign_status "
         "CHECK (status IN ('DRAFT', 'PENDING_PAYMENT', 'ACTIVE', 'PAUSED', 'COMPLETED'))"
