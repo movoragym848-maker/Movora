@@ -142,6 +142,8 @@
 .mk-payment-choice-demo { border-color: #edd49c; background: #fffcf4; }
 .mk-payment-setup-note, .mk-payment-warning { margin: 0; border-radius: 8px; padding: 9px 10px; font-size: 10px; line-height: 1.5; }
 .mk-payment-setup-note { border: 1px solid #dce8fa; background: #f6f9ff; color: #536783; }
+.mk-payment-setup-note strong { display: block; margin-bottom: 5px; }
+.mk-payment-setup-note ul { display: grid; gap: 4px; margin: 0; padding-left: 17px; }
 .mk-payment-warning { border: 1px solid #f0d6a0; background: #fff9eb; color: #805700; font-weight: 650; }
 .mk-payment-cancel { min-height: 36px; border: 1px solid #e1e7ef; border-radius: 8px; background: #fff; color: #576980; cursor: pointer; font-size: 11px; font-weight: 700; }
 .mk-payment-cancel:disabled { cursor: wait; opacity: .6; }

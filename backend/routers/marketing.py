@@ -91,21 +91,33 @@ def _normalize_ad_account_id(value: str) -> str:
     return value.strip().removeprefix("act_")
 
 
-def demo_payment_is_enabled() -> bool:
-    """Require explicit opt-in and an exact match to the configured Meta test account."""
+def _demo_payment_reasons() -> list[str]:
+    """Explain each missing sandbox prerequisite without returning credential values."""
+    reasons = []
     if os.getenv("MARKETING_DEMO_PAYMENT_ENABLED", "").strip().lower() != "true":
-        return False
+        reasons.append("Set MARKETING_DEMO_PAYMENT_ENABLED to true on the marketing service.")
     sandbox_account_id = os.getenv("META_SANDBOX_AD_ACCOUNT_ID", "").strip()
     configured_account_id = os.getenv("META_AD_ACCOUNT_ID", "").strip()
-    if not sandbox_account_id or not configured_account_id:
-        return False
-    if _normalize_ad_account_id(sandbox_account_id) != _normalize_ad_account_id(configured_account_id):
-        return False
-    try:
-        MetaMarketingService().validate_configuration()
-    except MetaConfigurationError:
-        return False
-    return True
+    if not sandbox_account_id:
+        reasons.append("Set META_SANDBOX_AD_ACCOUNT_ID to the Meta test ad account ID.")
+    if not configured_account_id:
+        reasons.append("Set META_AD_ACCOUNT_ID to the Meta ad account ID.")
+    elif sandbox_account_id and _normalize_ad_account_id(sandbox_account_id) != _normalize_ad_account_id(configured_account_id):
+        reasons.append("META_AD_ACCOUNT_ID does not match META_SANDBOX_AD_ACCOUNT_ID.")
+
+    missing_meta_variables = [
+        variable
+        for variable in ("META_APP_ID", "META_APP_SECRET", "META_AD_ACCOUNT_ID", "META_PAGE_ID", "META_ACCESS_TOKEN")
+        if not os.getenv(variable, "").strip()
+    ]
+    if missing_meta_variables:
+        reasons.append(f"Set the missing Meta variables on the marketing service: {', '.join(missing_meta_variables)}.")
+    return reasons
+
+
+def demo_payment_is_enabled() -> bool:
+    """Require explicit opt-in, complete Meta configuration, and the matching sandbox account."""
+    return not _demo_payment_reasons()
 
 
 @router.get("/campaigns/payment-options", response_model=CampaignPaymentOptionsResponse)
@@ -114,9 +126,20 @@ def get_campaign_payment_options(
 ) -> CampaignPaymentOptionsResponse:
     """Report available payment modes without exposing payment or Meta credentials."""
     payments = MarketingPaymentService()
+    razorpay_missing_variables = [
+        variable
+        for variable, configured in (
+            ("RAZORPAY_KEY_ID", payments.key_id),
+            ("RAZORPAY_KEY_SECRET", payments.key_secret),
+        )
+        if not configured
+    ]
+    demo_payment_reasons = _demo_payment_reasons()
     return CampaignPaymentOptionsResponse(
-        razorpay_available=bool(payments.key_id and payments.key_secret),
-        demo_payment_available=demo_payment_is_enabled(),
+        razorpay_available=not razorpay_missing_variables,
+        razorpay_missing_variables=razorpay_missing_variables,
+        demo_payment_available=not demo_payment_reasons,
+        demo_payment_reasons=demo_payment_reasons,
     )
 
 
@@ -193,7 +216,7 @@ def create_campaign(
     if payment_mode == "demo" and not demo_payment_is_enabled():
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Demo payment is disabled or the configured Meta account does not match META_SANDBOX_AD_ACCOUNT_ID.",
+            detail="Sandbox demo is unavailable: " + " ".join(_demo_payment_reasons()),
         )
     try:
         MetaMarketingService().validate_configuration()

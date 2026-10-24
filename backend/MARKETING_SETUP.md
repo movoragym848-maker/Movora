@@ -12,7 +12,7 @@ Create a **separate Railway service** for the marketing API and configure it to:
 2. Build with the Dockerfile `fastapi.Dockerfile`.
 3. Leave the custom start command unset. The Dockerfile installs `requirements.txt`, applies Alembic migrations, and starts Uvicorn on Railway's `$PORT`.
 
-Set the environment variables below on this FastAPI service. In the frontend Railway service, set `VITE_MARKETING_API_URL` to the FastAPI service's public origin (for example, `https://<fastapi-service>.up.railway.app`), not the existing Express service URL. Vite embeds this value at build time, so redeploy the frontend after changing it.
+Set the environment variables below on this FastAPI service. The frontend defaults to Movora's marketing service origin (`https://movora-marketing-production.up.railway.app`). If deploying the marketing API at a different origin, set `VITE_MARKETING_API_URL` on the frontend build to that public origin (without `/api`) and rebuild/redeploy the frontend; Vite embeds overrides at build time.
 
 Configure these environment variables on the FastAPI service:
 
@@ -29,7 +29,7 @@ The marketing screen can offer a no-charge demo option only when the marketing s
 
 Only enable this in a controlled test deployment after independently verifying the ad account is a Meta test/sandbox account. The service compares the configured IDs; it cannot determine from the ID alone whether Meta will deliver ads or charge the account. Never set these variables to a live ad account. Keep demo mode disabled for production/live campaigns. The `025_campaign_test_payment` migration is applied by the Docker startup command.
 
-The campaign screen queries `/api/v1/marketing/campaigns/payment-options` and shows a Razorpay setup reminder when the payment keys are absent. Add `RAZORPAY_KEY_ID` and `RAZORPAY_KEY_SECRET` to enable real checkout; they are not required to run the gated sandbox test.
+The campaign screen queries `/api/v1/marketing/campaigns/payment-options`. It reports missing Razorpay variable names and specific sandbox blockers (missing opt-in, missing account IDs, account mismatch, or missing Meta variable names) without returning any credential values. Add `RAZORPAY_KEY_ID` and `RAZORPAY_KEY_SECRET` to enable real checkout; they are not required to run the gated sandbox test.
 
 Campaign creative uploads accept JPEG, PNG, WebP, MP4, and MOV files up to 500 MiB. Configure the frontend host, reverse proxy, and FastAPI deployment to allow request bodies slightly larger than 500 MiB to account for multipart form overhead. Files are streamed to R2 with multipart upload rather than buffered fully in application memory.
 

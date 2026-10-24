@@ -261,7 +261,12 @@ function MarketingCenter({ gymOwner }: { gymOwner: { id?: string; gym_id?: strin
         primary_text: primaryText.trim(),
       };
       const options = await getGymCampaignPaymentOptions() as CampaignPaymentOptions;
-      if (typeof options.razorpay_available !== "boolean" || typeof options.demo_payment_available !== "boolean") {
+      if (
+        typeof options.razorpay_available !== "boolean"
+        || !Array.isArray(options.razorpay_missing_variables)
+        || typeof options.demo_payment_available !== "boolean"
+        || !Array.isArray(options.demo_payment_reasons)
+      ) {
         throw new Error("The campaign payment options response was invalid.");
       }
       setPendingCampaign(payload);
@@ -442,7 +447,9 @@ function MarketingCenter({ gymOwner }: { gymOwner: { id?: string; gym_id?: strin
               onClick={() => void choosePaymentMode("razorpay")}
             >
               <strong>Pay with Razorpay</strong>
-              <span>{paymentOptions.razorpay_available ? "Real payment · campaign activates after verified payment" : "Unavailable until Razorpay keys are configured"}</span>
+              <span>{paymentOptions.razorpay_available
+                ? "Real payment · campaign activates after verified payment"
+                : `Unavailable · missing ${paymentOptions.razorpay_missing_variables.join(", ") || "Razorpay configuration"}`}</span>
             </button>
             <button
               type="button"
@@ -453,8 +460,16 @@ function MarketingCenter({ gymOwner }: { gymOwner: { id?: string; gym_id?: strin
               <strong>Run sandbox demo</strong>
               <span>{paymentOptions.demo_payment_available
                 ? "No charge · activates only in the configured Meta sandbox ad account"
-                : "Unavailable · backend sandbox mode and matching test account are required"}</span>
+                : "Unavailable · review the exact configuration issue(s) below."}</span>
             </button>
+            {!paymentOptions.demo_payment_available && paymentOptions.demo_payment_reasons.length > 0 && (
+              <div className="mk-payment-setup-note" role="status">
+                <strong>Sandbox demo is blocked because:</strong>
+                <ul>
+                  {paymentOptions.demo_payment_reasons.map(reason => <li key={reason}>{reason}</li>)}
+                </ul>
+              </div>
+            )}
             {!paymentOptions.razorpay_available && (
               <p className="mk-payment-setup-note" role="note">
                 To enable real checkout later, add RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET to the marketing service in Railway.

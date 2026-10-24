@@ -30,6 +30,7 @@ from routers.marketing import (
     list_gym_campaigns,
     require_gym_owner,
     upload_campaign_creative,
+    _demo_payment_reasons,
 )
 from schemas.marketing import CampaignCreateRequest, CampaignObjective
 from services.meta_marketing import MetaCampaignIds, MetaMarketingService
@@ -125,6 +126,27 @@ class CampaignDemoPaymentTests(unittest.TestCase):
             os.environ["MARKETING_DEMO_PAYMENT_ENABLED"] = "false"
             self.assertFalse(demo_payment_is_enabled())
 
+    def test_reports_exact_demo_blockers_without_secret_values(self) -> None:
+        environment = {
+            "MARKETING_DEMO_PAYMENT_ENABLED": "true",
+            "META_SANDBOX_AD_ACCOUNT_ID": "act_12345",
+            "META_AD_ACCOUNT_ID": "98765",
+            "META_APP_ID": "app",
+            "META_APP_SECRET": "",
+            "META_PAGE_ID": "page",
+            "META_ACCESS_TOKEN": "token",
+        }
+        with patch.dict(os.environ, environment, clear=True):
+            reasons = _demo_payment_reasons()
+
+        self.assertEqual(
+            reasons,
+            [
+                "META_AD_ACCOUNT_ID does not match META_SANDBOX_AD_ACCOUNT_ID.",
+                "Set the missing Meta variables on the marketing service: META_APP_SECRET.",
+            ],
+        )
+
     def test_disabled_demo_execution_is_rejected(self) -> None:
         with patch.dict(os.environ, {}, clear=True):
             with self.assertRaises(HTTPException) as raised:
@@ -152,7 +174,20 @@ class CampaignDemoPaymentTests(unittest.TestCase):
         with patch.dict(os.environ, {}, clear=True):
             options = get_campaign_payment_options("gym-id")
 
-        self.assertEqual(options.model_dump(), {"razorpay_available": False, "demo_payment_available": False})
+        self.assertEqual(
+            options.model_dump(),
+            {
+                "razorpay_available": False,
+                "razorpay_missing_variables": ["RAZORPAY_KEY_ID", "RAZORPAY_KEY_SECRET"],
+                "demo_payment_available": False,
+                "demo_payment_reasons": [
+                    "Set MARKETING_DEMO_PAYMENT_ENABLED to true on the marketing service.",
+                    "Set META_SANDBOX_AD_ACCOUNT_ID to the Meta test ad account ID.",
+                    "Set META_AD_ACCOUNT_ID to the Meta ad account ID.",
+                    "Set the missing Meta variables on the marketing service: META_APP_ID, META_APP_SECRET, META_AD_ACCOUNT_ID, META_PAGE_ID, META_ACCESS_TOKEN.",
+                ],
+            },
+        )
 
     def test_demo_activation_is_recorded_as_test_not_paid(self) -> None:
         campaign = GymCampaign(

@@ -26,7 +26,9 @@ export interface Campaign {
 
 export interface CampaignPaymentOptions {
   razorpay_available: boolean;
+  razorpay_missing_variables: string[];
   demo_payment_available: boolean;
+  demo_payment_reasons: string[];
 }
 
 export type CampaignPaymentMode = "razorpay" | "demo";

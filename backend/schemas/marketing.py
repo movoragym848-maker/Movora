@@ -69,7 +69,9 @@ class CampaignPaymentOptionsResponse(BaseModel):
     """Payment methods currently available to the authenticated gym owner."""
 
     razorpay_available: bool
+    razorpay_missing_variables: list[str]
     demo_payment_available: bool
+    demo_payment_reasons: list[str]
 
 
 class CampaignStatusResponse(BaseModel):
