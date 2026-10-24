@@ -120,6 +120,40 @@ def demo_payment_is_enabled() -> bool:
     return not _demo_payment_reasons()
 
 
+def _meta_error_detail(error: FacebookRequestError, operation: str) -> str:
+    """Return Meta's actionable error fields without exposing request parameters or credentials."""
+    body = error.body()
+    api_error = body.get("error", {}) if isinstance(body, dict) else {}
+    if not isinstance(api_error, dict):
+        api_error = {}
+
+    message = api_error.get("error_user_msg") or error.api_error_message() or error.get_message()
+    title = api_error.get("error_user_title")
+    details = f"{title}: {message}" if title and message else title or message
+    details = str(details or "Meta returned no additional error details.").strip()
+    for secret_name in ("META_ACCESS_TOKEN", "META_APP_SECRET"):
+        secret = os.getenv(secret_name, "").strip()
+        if secret:
+            details = details.replace(secret, "[redacted]")
+    details = " ".join(details.split())[:1000]
+
+    code = error.api_error_code()
+    subcode = error.api_error_subcode()
+    error_codes = []
+    if code is not None:
+        error_codes.append(f"code {code}")
+    if subcode is not None:
+        error_codes.append(f"subcode {subcode}")
+    code_summary = f" (Meta {' / '.join(error_codes)})" if error_codes else ""
+
+    http_status = error.http_status()
+    status_summary = f" (HTTP {http_status})" if http_status is not None else ""
+    return (
+        f"Meta rejected the {operation}{status_summary}{code_summary}: {details} "
+        "Check the Meta app permissions, ad-account and Page access, campaign settings, and creative policy."
+    )
+
+
 @router.get("/campaigns/payment-options", response_model=CampaignPaymentOptionsResponse)
 def get_campaign_payment_options(
     _gym_id: str = Depends(require_gym_owner),
@@ -302,8 +336,16 @@ def _activate_meta_campaign(
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)) from error
     except FacebookRequestError as error:
         session.rollback()
-        logger.exception("Meta rejected a gym-owner marketing campaign")
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Meta could not publish this campaign.") from error
+        logger.error(
+            "Meta rejected a gym campaign request (HTTP %s, code=%s, subcode=%s)",
+            error.http_status(),
+            error.api_error_code(),
+            error.api_error_subcode(),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=_meta_error_detail(error, "campaign"),
+        ) from error
 
     campaign.status = CampaignStatus.ACTIVE.value
     if payment_status is not None:
@@ -417,8 +459,16 @@ def campaign_analytics(
     except MetaConfigurationError as error:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)) from error
     except FacebookRequestError as error:
-        logger.exception("Meta campaign insights request failed")
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Meta analytics are temporarily unavailable.") from error
+        logger.error(
+            "Meta campaign analytics request failed (HTTP %s, code=%s, subcode=%s)",
+            error.http_status(),
+            error.api_error_code(),
+            error.api_error_subcode(),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=_meta_error_detail(error, "campaign analytics"),
+        ) from error
 
     actions = insights.get("actions", [])
     lead_types = {"lead", "onsite_conversion.lead_grouped", "onsite_conversion.messaging_conversation_started_7d"}

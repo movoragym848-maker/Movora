@@ -31,6 +31,8 @@ Only enable this in a controlled test deployment after independently verifying t
 
 The campaign screen queries `/api/v1/marketing/campaigns/payment-options`. It reports missing Razorpay variable names and specific sandbox blockers (missing opt-in, missing account IDs, account mismatch, or missing Meta variable names) without returning any credential values. Add `RAZORPAY_KEY_ID` and `RAZORPAY_KEY_SECRET` to enable real checkout; they are not required to run the gated sandbox test.
 
+When Meta rejects campaign creation or activation, the API returns Meta's user-facing reason and error code/subcode in the response, with access tokens and app secrets redacted. Railway runtime logs record the HTTP status and Meta error codes without logging the SDK request parameters.
+
 Campaign creative uploads accept JPEG, PNG, WebP, MP4, and MOV files up to 500 MiB. Configure the frontend host, reverse proxy, and FastAPI deployment to allow request bodies slightly larger than 500 MiB to account for multipart form overhead. Files are streamed to R2 with multipart upload rather than buffered fully in application memory.
 
 For a local FastAPI service, run `uvicorn main:app --reload` from `backend/` after setting its environment. Apply migrations with `alembic upgrade head`.

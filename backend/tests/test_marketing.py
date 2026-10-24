@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timezone
 from io import BytesIO
+import json
 import os
 import unittest
 from types import SimpleNamespace
@@ -22,6 +23,7 @@ from starlette.datastructures import UploadFile
 
 from main import app, debug_routes, root
 from models.marketing import GymCampaign
+from facebook_business.exceptions import FacebookRequestError
 from routers.marketing import (
     MAX_CREATIVE_BYTES,
     _activate_meta_campaign,
@@ -33,6 +35,7 @@ from routers.marketing import (
     require_gym_owner,
     upload_campaign_creative,
     _demo_payment_reasons,
+    _meta_error_detail,
 )
 from schemas.marketing import CampaignCreateRequest, CampaignObjective
 from services.meta_marketing import MetaCampaignIds, MetaMarketingService
@@ -244,6 +247,51 @@ class CampaignDemoPaymentTests(unittest.TestCase):
             session.flush()
 
         engine.dispose()
+
+
+class MetaErrorMessageTests(unittest.TestCase):
+    """Expose useful Meta API diagnostics without leaking credentials."""
+
+    def test_formats_meta_user_message_and_error_codes(self) -> None:
+        error = FacebookRequestError(
+            "Request failed",
+            {"method": "POST", "path": "/act_test/campaigns"},
+            400,
+            {},
+            json.dumps({
+                "error": {
+                    "message": "Invalid parameter",
+                    "error_user_title": "Ad account unavailable",
+                    "error_user_msg": "The ad account cannot create campaigns.",
+                    "code": 200,
+                    "error_subcode": 1815754,
+                }
+            }),
+        )
+
+        detail = _meta_error_detail(error, "campaign")
+
+        self.assertIn("Ad account unavailable", detail)
+        self.assertIn("The ad account cannot create campaigns.", detail)
+        self.assertIn("HTTP 400", detail)
+        self.assertIn("code 200", detail)
+        self.assertIn("subcode 1815754", detail)
+
+    def test_redacts_secrets_and_bounds_meta_error_text(self) -> None:
+        secret = "test-token-must-not-leak"
+        error = FacebookRequestError(
+            "Request failed",
+            {"method": "POST", "path": "/act_test/campaigns"},
+            400,
+            {},
+            json.dumps({"error": {"message": f"Rejected {secret} " + ("x" * 1500), "code": 100}}),
+        )
+        with patch.dict(os.environ, {"META_ACCESS_TOKEN": secret}, clear=True):
+            detail = _meta_error_detail(error, "campaign")
+
+        self.assertNotIn(secret, detail)
+        self.assertIn("[redacted]", detail)
+        self.assertLess(len(detail), 1200)
 
 
 class CampaignCreativeUploadTests(unittest.TestCase):
