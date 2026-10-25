@@ -422,7 +422,42 @@ class CampaignCreativeUploadTests(unittest.TestCase):
 
 
 class MetaVideoCreativeTests(unittest.TestCase):
-    """Verify uploaded video URLs are converted to Meta video ad creatives."""
+    """Verify uploaded media URLs are converted to Meta ad creatives."""
+
+    def test_image_creative_includes_the_call_to_action_destination(self) -> None:
+        payload = CampaignCreateRequest.model_validate({
+            "campaign_name": "Neighborhood trial",
+            "objective": "GET_MEMBERS",
+            "daily_budget_inr": 500,
+            "duration_days": 7,
+            "target_radius_km": 5,
+            "latitude": 19.076,
+            "longitude": 72.8777,
+            "image_url": "https://assets.example.test/campaign.jpg",
+            "primary_text": "Train with the team at your local gym.",
+        })
+        account = MagicMock()
+        account.create_campaign.return_value = {"id": "campaign-id"}
+        account.create_ad_set.return_value = {"id": "adset-id"}
+        account.create_ad_creative.return_value = {"id": "creative-id"}
+        account.create_ad.return_value = {"id": "ad-id"}
+        environment = {
+            "META_APP_ID": "app",
+            "META_APP_SECRET": "secret",
+            "META_AD_ACCOUNT_ID": "account",
+            "META_PAGE_ID": "page",
+            "META_ACCESS_TOKEN": "token",
+        }
+        with patch.dict(os.environ, environment), \
+                patch("services.meta_marketing.FacebookAdsApi.init"), \
+                patch("services.meta_marketing.AdAccount", return_value=account):
+            MetaMarketingService().create_campaign(payload)
+
+        story_spec = account.create_ad_creative.call_args.kwargs["params"]["object_story_spec"]
+        self.assertEqual(
+            story_spec["link_data"]["call_to_action"],
+            {"type": "LEARN_MORE", "value": {"link": "https://www.facebook.com/page"}},
+        )
 
     def test_creates_meta_video_creative_for_mp4_url(self) -> None:
         payload = CampaignCreateRequest.model_validate({

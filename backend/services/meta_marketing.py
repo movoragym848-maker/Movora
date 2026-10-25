@@ -108,7 +108,10 @@ class MetaMarketingService:
                     "link": f"https://www.facebook.com/{self.page_id}",
                     "image_url": media_url,
                     "message": payload.primary_text,
-                    "call_to_action": {"type": "LEARN_MORE"},
+                    "call_to_action": {
+                        "type": "LEARN_MORE",
+                        "value": {"link": f"https://www.facebook.com/{self.page_id}"},
+                    },
                 }
             }
         creative = account.create_ad_creative(
