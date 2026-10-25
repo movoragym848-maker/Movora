@@ -324,6 +324,24 @@ class CampaignDemoPaymentTests(unittest.TestCase):
 class MetaErrorMessageTests(unittest.TestCase):
     """Expose useful Meta API diagnostics without leaking credentials."""
 
+    def test_explains_generic_meta_server_error_without_guessing_the_cause(self) -> None:
+        error = FacebookRequestError(
+            "Request failed",
+            {"method": "POST", "path": "/act_test/campaigns"},
+            500,
+            {},
+            json.dumps({"error": {"message": "An unknown error has occurred.", "code": 1}}),
+        )
+
+        detail = _meta_error_detail(error, "campaign")
+
+        self.assertIn("generic server error", detail)
+        self.assertIn("HTTP 500, code 1", detail)
+        self.assertIn("Meta did not report a specific cause", detail)
+        self.assertIn("does not confirm that your image, ad text, Page, or account settings are wrong", detail)
+        self.assertIn("do not pay again", detail)
+        self.assertNotIn("Check the Meta app permissions", detail)
+
     def test_formats_meta_user_message_and_error_codes(self) -> None:
         error = FacebookRequestError(
             "Request failed",

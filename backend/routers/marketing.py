@@ -147,6 +147,16 @@ def _meta_error_detail(error: FacebookRequestError, operation: str) -> str:
     code_summary = f" (Meta {' / '.join(error_codes)})" if error_codes else ""
 
     http_status = error.http_status()
+    if code == 1 and http_status is not None and http_status >= 500:
+        return (
+            f"Meta returned a generic server error while processing the {operation} "
+            f"(HTTP {http_status}, code 1). Meta did not report a specific cause, so this "
+            "does not confirm that your image, ad text, Page, or account settings are wrong. "
+            "Check Meta Business Support and Account Quality, then try again later. "
+            "If payment was already completed, do not pay again; contact Movora support "
+            "and include this error code."
+        )
+
     status_summary = f" (HTTP {http_status})" if http_status is not None else ""
     return (
         f"Meta rejected the {operation}{status_summary}{code_summary}: {details} "
