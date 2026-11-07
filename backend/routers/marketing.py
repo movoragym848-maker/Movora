@@ -37,7 +37,12 @@ from services.marketing_payments import (
     PaymentProviderError,
     PaymentVerificationError,
 )
-from services.meta_marketing import MetaCampaignIds, MetaConfigurationError, MetaMarketingService
+from services.meta_marketing import (
+    MetaCampaignCreationError,
+    MetaCampaignIds,
+    MetaConfigurationError,
+    MetaMarketingService,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/marketing", tags=["marketing"])
@@ -148,13 +153,19 @@ def _meta_error_detail(error: FacebookRequestError, operation: str) -> str:
 
     http_status = error.http_status()
     if code == 1 and http_status is not None and http_status >= 500:
+        trace_id = str(api_error.get("fbtrace_id", "")).strip()
+        support_reference = (
+            f"\n\nMeta support reference: {' '.join(trace_id.split())[:100]}"
+            if trace_id
+            else ""
+        )
         return (
-            f"Meta returned a generic server error while processing the {operation} "
-            f"(HTTP {http_status}, code 1). Meta did not report a specific cause, so this "
-            "does not confirm that your image, ad text, Page, or account settings are wrong. "
-            "Check Meta Business Support and Account Quality, then try again later. "
-            "If payment was already completed, do not pay again; contact Movora support "
-            "and include this error code."
+            f"Meta could not process this {operation} (HTTP {http_status}, code 1).\n\n"
+            "What this means: Meta did not report a specific cause. This does not confirm "
+            "that your image, ad text, Page, or account settings are wrong.\n\n"
+            "What to do: Check Meta Business Support and Account Quality, then try again later.\n\n"
+            "Payment safety: If Razorpay shows that payment is complete, do not pay again. "
+            f"Contact Movora support and share this error.{support_reference}"
         )
 
     status_summary = f" (HTTP {http_status})" if http_status is not None else ""
@@ -353,15 +364,18 @@ def _activate_meta_campaign(
     except MetaConfigurationError as error:
         session.rollback()
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)) from error
-    except FacebookRequestError as error:
+    except (FacebookRequestError, MetaCampaignCreationError) as error:
         session.rollback()
-        detail = _meta_error_detail(error, "campaign")
+        operation = error.operation if isinstance(error, MetaCampaignCreationError) else "campaign"
+        meta_error = error.meta_error if isinstance(error, MetaCampaignCreationError) else error
+        detail = _meta_error_detail(meta_error, operation)
         _mark_campaign_failed(campaign, session, detail)
         logger.error(
-            "Meta rejected a gym campaign request (HTTP %s, code=%s, subcode=%s)",
-            error.http_status(),
-            error.api_error_code(),
-            error.api_error_subcode(),
+            "Meta rejected a gym campaign request during %s (HTTP %s, code=%s, subcode=%s)",
+            operation,
+            meta_error.http_status(),
+            meta_error.api_error_code(),
+            meta_error.api_error_subcode(),
         )
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,

@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import urlparse
 
 from facebook_business.adobjects.ad import Ad
@@ -14,12 +14,22 @@ from facebook_business.adobjects.adcreative import AdCreative
 from facebook_business.adobjects.adset import AdSet
 from facebook_business.adobjects.campaign import Campaign as MetaCampaign
 from facebook_business.api import FacebookAdsApi
+from facebook_business.exceptions import FacebookRequestError
 
 from schemas.marketing import CampaignCreateRequest
 
 
 class MetaConfigurationError(RuntimeError):
     """Raised if one of Movora's parent Meta ad account settings is missing."""
+
+
+class MetaCampaignCreationError(RuntimeError):
+    """Keep the Meta creation step alongside the original API error."""
+
+    def __init__(self, operation: str, meta_error: FacebookRequestError) -> None:
+        super().__init__(f"Meta failed while creating the {operation}.")
+        self.operation = operation
+        self.meta_error = meta_error
 
 
 @dataclass(frozen=True)
@@ -50,48 +60,58 @@ class MetaMarketingService:
         account_id = self.ad_account_id if self.ad_account_id.startswith("act_") else f"act_{self.ad_account_id}"
         account = AdAccount(account_id)
 
-        campaign = account.create_campaign(
-            params={
-                "name": payload.campaign_name,
-                "objective": "OUTCOME_TRAFFIC",
-                "status": MetaCampaign.Status.paused,
-                "special_ad_categories": [],
-                "is_adset_budget_sharing_enabled": False,
-            }
+        campaign = self._run_creation_step(
+            "campaign",
+            lambda: account.create_campaign(
+                params={
+                    "name": payload.campaign_name,
+                    "objective": "OUTCOME_TRAFFIC",
+                    "status": MetaCampaign.Status.paused,
+                    "special_ad_categories": [],
+                    "is_adset_budget_sharing_enabled": False,
+                }
+            ),
         )
         campaign_id = str(campaign["id"])
 
-        adset = account.create_ad_set(
-            params={
-                "name": f"{payload.campaign_name} - Movora",
-                "campaign_id": campaign_id,
-                "daily_budget": str(round(payload.daily_budget_inr * 100)),
-                "billing_event": AdSet.BillingEvent.impressions,
-                "optimization_goal": AdSet.OptimizationGoal.link_clicks,
-                "bid_strategy": AdSet.BidStrategy.lowest_cost_without_cap,
-                "end_time": (datetime.now(timezone.utc) + timedelta(days=payload.duration_days)).isoformat(),
-                "targeting": {
-                    "geo_locations": {
-                        "custom_locations": [
-                            {
-                                "latitude": payload.latitude,
-                                "longitude": payload.longitude,
-                                "radius": payload.target_radius_km,
-                                "distance_unit": "kilometer",
-                                "country_code": "IN",
-                            }
-                        ]
-                    }
-                },
-                "promoted_object": {"page_id": self.page_id},
-                "status": AdSet.Status.paused,
-            }
+        adset = self._run_creation_step(
+            "ad set",
+            lambda: account.create_ad_set(
+                params={
+                    "name": f"{payload.campaign_name} - Movora",
+                    "campaign_id": campaign_id,
+                    "daily_budget": str(round(payload.daily_budget_inr * 100)),
+                    "billing_event": AdSet.BillingEvent.impressions,
+                    "optimization_goal": AdSet.OptimizationGoal.link_clicks,
+                    "bid_strategy": AdSet.BidStrategy.lowest_cost_without_cap,
+                    "destination_type": AdSet.DestinationType.website,
+                    "end_time": (datetime.now(timezone.utc) + timedelta(days=payload.duration_days)).isoformat(),
+                    "targeting": {
+                        "geo_locations": {
+                            "custom_locations": [
+                                {
+                                    "latitude": payload.latitude,
+                                    "longitude": payload.longitude,
+                                    "radius": payload.target_radius_km,
+                                    "distance_unit": "kilometer",
+                                    "country_code": "IN",
+                                }
+                            ]
+                        }
+                    },
+                    "promoted_object": {"page_id": self.page_id},
+                    "status": AdSet.Status.paused,
+                }
+            ),
         )
         adset_id = str(adset["id"])
 
         media_url = str(payload.image_url)
         if urlparse(media_url).path.lower().endswith((".mp4", ".mov")):
-            video = account.create_ad_video(params={"file_url": media_url})
+            video = self._run_creation_step(
+                "video upload",
+                lambda: account.create_ad_video(params={"file_url": media_url}),
+            )
             story_media = {
                 "video_data": {
                     "video_id": str(video["id"]),
@@ -114,22 +134,35 @@ class MetaMarketingService:
                     },
                 }
             }
-        creative = account.create_ad_creative(
-            params={
-                "name": f"{payload.campaign_name} creative",
-                "object_story_spec": {"page_id": self.page_id, **story_media},
-            }
+        creative = self._run_creation_step(
+            "ad creative",
+            lambda: account.create_ad_creative(
+                params={
+                    "name": f"{payload.campaign_name} creative",
+                    "object_story_spec": {"page_id": self.page_id, **story_media},
+                }
+            ),
         )
 
-        ad = account.create_ad(
-            params={
-                "name": f"{payload.campaign_name} ad",
-                "adset_id": adset_id,
-                "creative": {"creative_id": str(creative["id"])},
-                "status": Ad.Status.paused,
-            }
+        ad = self._run_creation_step(
+            "ad",
+            lambda: account.create_ad(
+                params={
+                    "name": f"{payload.campaign_name} ad",
+                    "adset_id": adset_id,
+                    "creative": {"creative_id": str(creative["id"])},
+                    "status": Ad.Status.paused,
+                }
+            ),
         )
         return MetaCampaignIds(campaign_id=campaign_id, adset_id=adset_id, ad_id=str(ad["id"]))
+
+    @staticmethod
+    def _run_creation_step(operation: str, action: Callable[[], Any]) -> Any:
+        try:
+            return action()
+        except FacebookRequestError as error:
+            raise MetaCampaignCreationError(operation, error) from error
 
     def activate_campaign(self, ids: MetaCampaignIds) -> None:
         """Activate the paid campaign, ad set, and ad after payment verification."""

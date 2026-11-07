@@ -39,7 +39,7 @@ from routers.marketing import (
     _mark_campaign_failed,
 )
 from schemas.marketing import CampaignCreateRequest, CampaignObjective
-from services.meta_marketing import MetaCampaignIds, MetaMarketingService
+from services.meta_marketing import MetaCampaignCreationError, MetaCampaignIds, MetaMarketingService
 
 
 class CampaignSchemaTests(unittest.TestCase):
@@ -248,7 +248,7 @@ class CampaignDemoPaymentTests(unittest.TestCase):
             json.dumps({"error": {"message": "Invalid budget", "code": 100}}),
         )
         meta = MagicMock()
-        meta.create_campaign.side_effect = error
+        meta.create_campaign.side_effect = MetaCampaignCreationError("ad set", error)
         session = MagicMock()
 
         with patch("routers.marketing.MetaMarketingService", return_value=meta):
@@ -256,6 +256,7 @@ class CampaignDemoPaymentTests(unittest.TestCase):
                 _activate_meta_campaign(campaign, session, payment_status="TEST")
 
         self.assertEqual(raised.exception.status_code, 502)
+        self.assertIn("ad set", raised.exception.detail)
         self.assertEqual(campaign.status, "FAILED")
         self.assertIn("Invalid budget", campaign.failure_reason)
         self.assertEqual(campaign.payment_status, "CREATED")
@@ -324,22 +325,29 @@ class CampaignDemoPaymentTests(unittest.TestCase):
 class MetaErrorMessageTests(unittest.TestCase):
     """Expose useful Meta API diagnostics without leaking credentials."""
 
-    def test_explains_generic_meta_server_error_without_guessing_the_cause(self) -> None:
+    def test_explains_generic_meta_server_error_and_includes_support_reference(self) -> None:
         error = FacebookRequestError(
             "Request failed",
             {"method": "POST", "path": "/act_test/campaigns"},
             500,
             {},
-            json.dumps({"error": {"message": "An unknown error has occurred.", "code": 1}}),
+            json.dumps({
+                "error": {
+                    "message": "An unknown error has occurred.",
+                    "code": 1,
+                    "fbtrace_id": "META-TRACE-123",
+                }
+            }),
         )
 
         detail = _meta_error_detail(error, "campaign")
 
-        self.assertIn("generic server error", detail)
+        self.assertIn("Meta could not process this campaign", detail)
         self.assertIn("HTTP 500, code 1", detail)
-        self.assertIn("Meta did not report a specific cause", detail)
+        self.assertIn("What this means: Meta did not report a specific cause", detail)
         self.assertIn("does not confirm that your image, ad text, Page, or account settings are wrong", detail)
-        self.assertIn("do not pay again", detail)
+        self.assertIn("Payment safety: If Razorpay shows that payment is complete, do not pay again", detail)
+        self.assertIn("Meta support reference: META-TRACE-123", detail)
         self.assertNotIn("Check the Meta app permissions", detail)
 
     def test_formats_meta_user_message_and_error_codes(self) -> None:
@@ -453,11 +461,51 @@ class MetaVideoCreativeTests(unittest.TestCase):
                 patch("services.meta_marketing.AdAccount", return_value=account):
             MetaMarketingService().create_campaign(payload)
 
+        adset_params = account.create_ad_set.call_args.kwargs["params"]
+        self.assertEqual(adset_params["destination_type"], "WEBSITE")
         story_spec = account.create_ad_creative.call_args.kwargs["params"]["object_story_spec"]
         self.assertEqual(
             story_spec["link_data"]["call_to_action"],
             {"type": "LEARN_MORE", "value": {"link": "https://www.facebook.com/page"}},
         )
+
+    def test_reports_ad_set_as_the_failed_meta_creation_step(self) -> None:
+        payload = CampaignCreateRequest.model_validate({
+            "campaign_name": "Neighborhood trial",
+            "objective": "GET_MEMBERS",
+            "daily_budget_inr": 500,
+            "duration_days": 7,
+            "target_radius_km": 5,
+            "latitude": 19.076,
+            "longitude": 72.8777,
+            "image_url": "https://assets.example.test/campaign.jpg",
+            "primary_text": "Train with the team at your local gym.",
+        })
+        account = MagicMock()
+        account.create_campaign.return_value = {"id": "campaign-id"}
+        account.create_ad_set.side_effect = FacebookRequestError(
+            "Request failed",
+            {"method": "POST", "path": "/act_test/adsets"},
+            500,
+            {},
+            json.dumps({"error": {"message": "An unknown error has occurred.", "code": 1}}),
+        )
+        environment = {
+            "META_APP_ID": "app",
+            "META_APP_SECRET": "secret",
+            "META_AD_ACCOUNT_ID": "account",
+            "META_PAGE_ID": "page",
+            "META_ACCESS_TOKEN": "token",
+        }
+        with patch.dict(os.environ, environment), \
+                patch("services.meta_marketing.FacebookAdsApi.init"), \
+                patch("services.meta_marketing.AdAccount", return_value=account):
+            with self.assertRaises(MetaCampaignCreationError) as raised:
+                MetaMarketingService().create_campaign(payload)
+
+        self.assertEqual(raised.exception.operation, "ad set")
+        self.assertIsInstance(raised.exception.meta_error, FacebookRequestError)
+        account.create_ad_creative.assert_not_called()
 
     def test_creates_meta_video_creative_for_mp4_url(self) -> None:
         payload = CampaignCreateRequest.model_validate({
