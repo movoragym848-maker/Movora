@@ -60,6 +60,22 @@ function formatMoney(amount: number): string {
   return `₹${Math.round(amount).toLocaleString("en-IN")}`;
 }
 
+function presentCampaignError(message: string): string {
+  if (!/generic server error/i.test(message) || !/\bHTTP 500\b/i.test(message) || !/\bcode 1\b/i.test(message)) {
+    return message;
+  }
+
+  const supportReference = message.match(/(?:fbtrace_id|support reference)\s*[:=]\s*([A-Za-z0-9._-]+)/i)?.[1];
+  return [
+    "Meta couldn't process this campaign (HTTP 500, code 1).",
+    "",
+    "What this means: Meta returned an unspecified server error. It did not identify the cause, so this does not confirm that your image, ad text, Page, or account settings are wrong.",
+    "",
+    "What to do: Check Meta Business Support and Account Quality, then try again later. If you chose Razorpay, check your payment status before trying again.",
+    ...(supportReference ? ["", `Meta support reference: ${supportReference}`] : []),
+  ].join("\n");
+}
+
 function statusLabel(status: CampaignStatus): string {
   const labels: Record<CampaignStatus, string> = {
     DRAFT: "Payment pending",
@@ -403,7 +419,7 @@ function MarketingCenter({ gymOwner }: { gymOwner: { id?: string; gym_id?: strin
               <span><small>{formatMoney(dailyBudget)} × {durationDays} days + estimated GST</small><strong>Campaign total</strong></span>
               <strong>{formatMoney(totalAmount)}</strong>
             </div>
-            {formError && <p className="mk-form-error" role="alert">{formError}</p>}
+            {formError && <p className="mk-form-error" role="alert">{presentCampaignError(formError)}</p>}
             {notice && <p className="mk-form-notice" role="status"><CheckCircle2 size={15} />{notice}</p>}
             <button type="submit" className="mk-launch-button" disabled={submitting || uploadLoading || !creativeUrl || !coordinates}>
               {submitting ? <><LoaderCircle size={17} className="mk-spin" /> Preparing secure checkout</> : <>Launch Campaign <span>• {formatMoney(totalAmount)}</span><ArrowUpRight size={17} /> </>}
@@ -427,7 +443,7 @@ function MarketingCenter({ gymOwner }: { gymOwner: { id?: string; gym_id?: strin
                       <span className={`mk-campaign-status mk-status-${campaign.status.toLowerCase()}`}>{statusLabel(campaign.status)}</span>
                       {campaign.payment_status === "TEST" && <span className="mk-test-payment-badge">SANDBOX TEST · NOT PAID</span>}
                       <strong>{campaign.campaign_name}</strong>
-                      {campaign.failure_reason && <span className="mk-campaign-failure">{campaign.failure_reason}</span>}
+                      {campaign.failure_reason && <span className="mk-campaign-failure">{presentCampaignError(campaign.failure_reason)}</span>}
                       {campaign.status === "FAILED" && campaign.payment_status === "PAID" && (
                         <span className="mk-campaign-failure">
                           Razorpay payment was verified, but Meta did not launch the campaign. Contact Movora support before attempting another payment.

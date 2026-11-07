@@ -92,7 +92,7 @@
 .mk-price-summary > span strong { color: #394d69; font-size: 9px; }
 .mk-price-summary > strong { color: #075fe5; font-family: 'Barlow Condensed', sans-serif; font-size: 20px; font-weight: 800; }
 .mk-form-error, .mk-form-notice { display: flex; align-items: flex-start; gap: 6px; margin: 11px 0 0; border-radius: 8px; padding: 9px 10px; font-size: 9px; line-height: 1.5; }
-.mk-form-error { border: 1px solid #f2d3d7; background: #fff7f7; color: #b42332; }
+.mk-form-error { border: 1px solid #f2d3d7; background: #fff7f7; color: #b42332; white-space: pre-line; }
 .mk-form-notice { border: 1px solid #d3eee2; background: #f3fbf7; color: #167b58; }
 .mk-form-notice svg { flex-shrink: 0; }
 .mk-launch-button { display: flex; width: 100%; min-height: 43px; align-items: center; justify-content: center; gap: 7px; margin-top: 13px; border: 1px solid var(--mk-blue); border-radius: 9px; padding: 0 14px; background: var(--mk-blue); color: #fff; box-shadow: 0 5px 12px rgba(0, 102, 255, .15); cursor: pointer; font-size: 11px; font-weight: 750; transition: .15s ease; }
@@ -124,7 +124,7 @@
 .mk-status-draft, .mk-status-pending_payment { background: #eff4fc; color: #61728b; }
 .mk-status-completed { background: #f1f3f6; color: #69778c; }
 .mk-status-failed { background: #fff0f0; color: #b42332; }
-.mk-campaign-failure { overflow-wrap: anywhere; border-radius: 7px; padding: 7px; background: #fff7f7; color: #a52b38; font-size: 9px; line-height: 1.45; }
+.mk-campaign-failure { overflow-wrap: anywhere; border-radius: 7px; padding: 7px; background: #fff7f7; color: #a52b38; font-size: 9px; line-height: 1.45; white-space: pre-line; }
 .mk-integration-note { display: flex; align-items: center; gap: 9px; margin-top: 15px; border-top: 1px solid #edf0f5; padding-top: 13px; }
 .mk-integration-mark { display: grid; width: 27px; height: 27px; flex-shrink: 0; place-items: center; border-radius: 8px; background: #eaf2ff; color: #0066ff; font-family: 'Barlow Condensed', sans-serif; font-size: 13px; font-weight: 900; }
 .mk-integration-note > span:last-child { display: grid; gap: 3px; }
