@@ -37,6 +37,10 @@ const budgetOptions = [300, 500, 1000];
 const durationOptions = [3, 7, 14];
 const maximumCreativeBytes = 500 * 1024 * 1024;
 
+function isWithinIndiaTargetingRegion(latitude: number, longitude: number): boolean {
+  return latitude >= 6.5 && latitude <= 37.6 && longitude >= 68 && longitude <= 97.5;
+}
+
 function loadRazorpay(): Promise<void> {
   if (window.Razorpay) return Promise.resolve();
   return new Promise((resolve, reject) => {
@@ -159,10 +163,14 @@ function MarketingCenter({ gymOwner }: { gymOwner: { id?: string; gym_id?: strin
     setLocationLoading(true);
     navigator.geolocation.getCurrentPosition(
       position => {
-        setCoordinates({
-          latitude: position.coords.latitude,
-          longitude: position.coords.longitude,
-        });
+        const latitude = position.coords.latitude;
+        const longitude = position.coords.longitude;
+        if (!isWithinIndiaTargetingRegion(latitude, longitude)) {
+          setCoordinates(null);
+          setLocationError("The detected location is outside India's ad-targeting region. Enable accurate location at your gym, then try again.");
+        } else {
+          setCoordinates({ latitude, longitude });
+        }
         setLocationLoading(false);
       },
       error => {

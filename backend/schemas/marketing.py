@@ -6,7 +6,7 @@ from datetime import datetime
 from enum import Enum
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator, model_validator
 
 
 class CampaignObjective(str, Enum):
@@ -56,6 +56,16 @@ class CampaignCreateRequest(BaseModel):
         if value not in {3, 7, 14}:
             raise ValueError("Choose a duration of 3, 7, or 14 days.")
         return value
+
+    @model_validator(mode="after")
+    def validate_india_target_location(self) -> CampaignCreateRequest:
+        """Avoid sending coordinates outside India's supported campaign targeting region."""
+        if not (6.5 <= self.latitude <= 37.6 and 68.0 <= self.longitude <= 97.5):
+            raise ValueError(
+                "The selected gym location is outside India's ad-targeting region. "
+                "Update your device location to the gym and select its location again."
+            )
+        return self
 
 
 class CampaignExecuteRequest(BaseModel):

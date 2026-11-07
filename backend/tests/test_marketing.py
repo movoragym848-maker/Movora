@@ -70,6 +70,16 @@ class CampaignSchemaTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             CampaignCreateRequest.model_validate({**self.payload, "objective": "TRAFFIC"})
 
+    def test_rejects_coordinates_outside_india_targeting_region(self) -> None:
+        with self.assertRaises(ValidationError) as raised:
+            CampaignCreateRequest.model_validate({
+                **self.payload,
+                "latitude": -22.3482,
+                "longitude": 77.0968,
+            })
+
+        self.assertIn("outside India's ad-targeting region", str(raised.exception))
+
 
 class CampaignPriceTests(unittest.TestCase):
     """Verify checkout totals are calculated in integer paise."""
