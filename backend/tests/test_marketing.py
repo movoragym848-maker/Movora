@@ -509,13 +509,121 @@ class MetaVideoCreativeTests(unittest.TestCase):
         }
         with patch.dict(os.environ, environment), \
                 patch("services.meta_marketing.FacebookAdsApi.init"), \
-                patch("services.meta_marketing.AdAccount", return_value=account):
+                patch("services.meta_marketing.AdAccount", return_value=account), \
+                patch("services.meta_marketing.MetaCampaign.get_ad_sets", return_value=[]), \
+                patch("services.meta_marketing.time.sleep"):
             with self.assertRaises(MetaCampaignCreationError) as raised:
                 MetaMarketingService().create_campaign(payload)
 
         self.assertEqual(raised.exception.operation, "ad set")
         self.assertIsInstance(raised.exception.meta_error, FacebookRequestError)
         account.create_ad_creative.assert_not_called()
+        self.assertEqual(account.create_ad_set.call_count, 4)
+
+    def test_retries_transient_ad_set_server_error_with_exponential_backoff(self) -> None:
+        payload = CampaignCreateRequest.model_validate({
+            "campaign_name": "Neighborhood trial",
+            "objective": "GET_MEMBERS",
+            "daily_budget_inr": 500,
+            "duration_days": 7,
+            "target_radius_km": 5,
+            "latitude": 19.076,
+            "longitude": 72.8777,
+            "image_url": "https://assets.example.test/campaign.jpg",
+            "primary_text": "Train with the team at your local gym.",
+        })
+        error = FacebookRequestError(
+            "Request failed",
+            {"method": "POST", "path": "/act_test/adsets"},
+            500,
+            {},
+            json.dumps({"error": {"message": "An unknown error has occurred.", "code": 1}}),
+        )
+        account = MagicMock()
+        account.create_campaign.return_value = {"id": "campaign-id"}
+        account.create_ad_set.side_effect = [error, error, {"id": "adset-id"}]
+        account.create_ad_creative.return_value = {"id": "creative-id"}
+        account.create_ad.return_value = {"id": "ad-id"}
+        environment = {
+            "META_APP_ID": "app",
+            "META_APP_SECRET": "secret",
+            "META_AD_ACCOUNT_ID": "account",
+            "META_PAGE_ID": "page",
+            "META_ACCESS_TOKEN": "token",
+        }
+        with patch.dict(os.environ, environment), \
+                patch("services.meta_marketing.FacebookAdsApi.init"), \
+                patch("services.meta_marketing.AdAccount", return_value=account), \
+                patch("services.meta_marketing.MetaCampaign.get_ad_sets", return_value=[]), \
+                patch("services.meta_marketing.time.sleep") as sleep:
+            ids = MetaMarketingService().create_campaign(payload)
+
+        self.assertEqual(ids.adset_id, "adset-id")
+        self.assertEqual(account.create_ad_set.call_count, 3)
+        self.assertEqual([call.args[0] for call in sleep.call_args_list], [1, 2])
+
+    def test_does_not_retry_non_server_ad_set_errors(self) -> None:
+        error = FacebookRequestError(
+            "Request failed",
+            {"method": "POST", "path": "/act_test/adsets"},
+            400,
+            {},
+            json.dumps({"error": {"message": "Invalid parameter.", "code": 100}}),
+        )
+        account = MagicMock()
+        account.create_ad_set.side_effect = error
+
+        with patch("services.meta_marketing.MetaCampaign.get_ad_sets") as lookup, \
+                patch("services.meta_marketing.time.sleep") as sleep:
+            with self.assertRaises(MetaCampaignCreationError) as raised:
+                MetaMarketingService()._create_ad_set_with_retry(account, "campaign-id", {})
+
+        self.assertEqual(raised.exception.meta_error, error)
+        account.create_ad_set.assert_called_once()
+        lookup.assert_not_called()
+        sleep.assert_not_called()
+
+    def test_uses_existing_ad_set_after_ambiguous_meta_server_error(self) -> None:
+        payload = CampaignCreateRequest.model_validate({
+            "campaign_name": "Neighborhood trial",
+            "objective": "GET_MEMBERS",
+            "daily_budget_inr": 500,
+            "duration_days": 7,
+            "target_radius_km": 5,
+            "latitude": 19.076,
+            "longitude": 72.8777,
+            "image_url": "https://assets.example.test/campaign.jpg",
+            "primary_text": "Train with the team at your local gym.",
+        })
+        error = FacebookRequestError(
+            "Request failed",
+            {"method": "POST", "path": "/act_test/adsets"},
+            500,
+            {},
+            json.dumps({"error": {"message": "An unknown error has occurred.", "code": 1}}),
+        )
+        account = MagicMock()
+        account.create_campaign.return_value = {"id": "campaign-id"}
+        account.create_ad_set.side_effect = error
+        account.create_ad_creative.return_value = {"id": "creative-id"}
+        account.create_ad.return_value = {"id": "ad-id"}
+        environment = {
+            "META_APP_ID": "app",
+            "META_APP_SECRET": "secret",
+            "META_AD_ACCOUNT_ID": "account",
+            "META_PAGE_ID": "page",
+            "META_ACCESS_TOKEN": "token",
+        }
+        with patch.dict(os.environ, environment), \
+                patch("services.meta_marketing.FacebookAdsApi.init"), \
+                patch("services.meta_marketing.AdAccount", return_value=account), \
+                patch("services.meta_marketing.MetaCampaign.get_ad_sets", return_value=[{"id": "existing-adset"}]), \
+                patch("services.meta_marketing.time.sleep") as sleep:
+            ids = MetaMarketingService().create_campaign(payload)
+
+        self.assertEqual(ids.adset_id, "existing-adset")
+        account.create_ad_set.assert_called_once()
+        sleep.assert_called_once_with(1)
 
     def test_creates_meta_video_creative_for_mp4_url(self) -> None:
         payload = CampaignCreateRequest.model_validate({

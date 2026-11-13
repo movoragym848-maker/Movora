@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import logging
 import os
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
@@ -17,6 +19,8 @@ from facebook_business.api import FacebookAdsApi
 from facebook_business.exceptions import FacebookRequestError
 
 from schemas.marketing import CampaignCreateRequest
+
+logger = logging.getLogger(__name__)
 
 
 class MetaConfigurationError(RuntimeError):
@@ -44,6 +48,8 @@ class MetaCampaignIds:
 
 class MetaMarketingService:
     """Create and activate ads using Movora's parent Meta business account."""
+
+    ad_set_retry_delays_seconds = (1, 2, 4)
 
     def __init__(self) -> None:
         """Read Meta credentials from the environment without storing secrets."""
@@ -74,36 +80,32 @@ class MetaMarketingService:
         )
         campaign_id = str(campaign["id"])
 
-        adset = self._run_creation_step(
-            "ad set",
-            lambda: account.create_ad_set(
-                params={
-                    "name": f"{payload.campaign_name} - Movora",
-                    "campaign_id": campaign_id,
-                    "daily_budget": str(round(payload.daily_budget_inr * 100)),
-                    "billing_event": AdSet.BillingEvent.impressions,
-                    "optimization_goal": AdSet.OptimizationGoal.link_clicks,
-                    "bid_strategy": AdSet.BidStrategy.lowest_cost_without_cap,
-                    "destination_type": AdSet.DestinationType.website,
-                    "end_time": (datetime.now(timezone.utc) + timedelta(days=payload.duration_days)).isoformat(),
-                    "targeting": {
-                        "geo_locations": {
-                            "custom_locations": [
-                                {
-                                    "latitude": payload.latitude,
-                                    "longitude": payload.longitude,
-                                    "radius": payload.target_radius_km,
-                                    "distance_unit": "kilometer",
-                                    "country_code": "IN",
-                                }
-                            ]
+        adset_params = {
+            "name": f"{payload.campaign_name} - Movora",
+            "campaign_id": campaign_id,
+            "daily_budget": str(round(payload.daily_budget_inr * 100)),
+            "billing_event": AdSet.BillingEvent.impressions,
+            "optimization_goal": AdSet.OptimizationGoal.link_clicks,
+            "bid_strategy": AdSet.BidStrategy.lowest_cost_without_cap,
+            "destination_type": AdSet.DestinationType.website,
+            "end_time": (datetime.now(timezone.utc) + timedelta(days=payload.duration_days)).isoformat(),
+            "targeting": {
+                "geo_locations": {
+                    "custom_locations": [
+                        {
+                            "latitude": payload.latitude,
+                            "longitude": payload.longitude,
+                            "radius": payload.target_radius_km,
+                            "distance_unit": "kilometer",
+                            "country_code": "IN",
                         }
-                    },
-                    "promoted_object": {"page_id": self.page_id},
-                    "status": AdSet.Status.paused,
+                    ]
                 }
-            ),
-        )
+            },
+            "promoted_object": {"page_id": self.page_id},
+            "status": AdSet.Status.paused,
+        }
+        adset = self._create_ad_set_with_retry(account, campaign_id, adset_params)
         adset_id = str(adset["id"])
 
         media_url = str(payload.image_url)
@@ -163,6 +165,51 @@ class MetaMarketingService:
             return action()
         except FacebookRequestError as error:
             raise MetaCampaignCreationError(operation, error) from error
+
+    def _create_ad_set_with_retry(
+        self,
+        account: AdAccount,
+        campaign_id: str,
+        params: dict[str, Any],
+    ) -> Any:
+        for retry_index in range(len(self.ad_set_retry_delays_seconds) + 1):
+            try:
+                return account.create_ad_set(params=params)
+            except FacebookRequestError as error:
+                http_status = error.http_status()
+                is_retryable = http_status is not None and http_status >= 500 and error.api_error_code() == 1
+                if not is_retryable or retry_index == len(self.ad_set_retry_delays_seconds):
+                    raise MetaCampaignCreationError("ad set", error) from error
+
+                delay_seconds = self.ad_set_retry_delays_seconds[retry_index]
+                logger.warning(
+                    "Meta ad set creation returned HTTP %s, code 1; checking for a created ad set "
+                    "before retry %s of %s after %s seconds",
+                    http_status,
+                    retry_index + 1,
+                    len(self.ad_set_retry_delays_seconds),
+                    delay_seconds,
+                )
+                time.sleep(delay_seconds)
+                try:
+                    existing_adsets = list(MetaCampaign(campaign_id).get_ad_sets(fields=["id"]))
+                except FacebookRequestError as lookup_error:
+                    logger.warning(
+                        "Could not reconcile Meta ad sets after HTTP %s, code 1 "
+                        "(lookup HTTP %s, code %s); not retrying to avoid duplicate ad sets",
+                        http_status,
+                        lookup_error.http_status(),
+                        lookup_error.api_error_code(),
+                    )
+                    raise MetaCampaignCreationError("ad set", error) from lookup_error
+                if existing_adsets:
+                    logger.info(
+                        "Found an ad set for the campaign after an ambiguous Meta error; "
+                        "continuing without creating a duplicate"
+                    )
+                    return existing_adsets[0]
+
+        raise RuntimeError("Ad set retry loop exited without a result.")
 
     def activate_campaign(self, ids: MetaCampaignIds) -> None:
         """Activate the paid campaign, ad set, and ad after payment verification."""
